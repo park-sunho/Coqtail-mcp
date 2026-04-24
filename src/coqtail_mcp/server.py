@@ -34,9 +34,21 @@ atexit.register(_registry.close_all)
 mcp = FastMCP("coqtail-mcp")
 
 
-def _err() -> Dict[str, Any]:
-    """Minimal envelope for rejected tool calls."""
-    return {"ok": False}
+def _brief_error(exc: BaseException, *, limit: int = 300) -> str:
+    """Return a compact, single-line diagnostic for rejected tool calls."""
+    text = str(exc).strip() or exc.__class__.__name__
+    text = " ".join(text.split())
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
+def _err(exc: Optional[BaseException] = None) -> Dict[str, Any]:
+    """Compact envelope for rejected tool calls."""
+    data: Dict[str, Any] = {"ok": False}
+    if exc is not None:
+        data["error"] = _brief_error(exc)
+    return data
 
 
 def _omit_empty_fields(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -163,15 +175,15 @@ def rocq_start(
                 "startup_stderr": info["startup_stderr"],
             }
         )
-    except Exception:  # noqa: BLE001
-        return _err()
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 @mcp.tool(
     description=(
         "Close a session. The underlying coqidetop subprocess is terminated\n"
         "and its state is dropped. Safe to call on an unknown id (returns\n"
-        "`ok: false`)."
+        "`ok: false` with an `error` reason)."
     )
 )
 def rocq_close(session_id: str) -> Dict[str, Any]:
@@ -179,14 +191,15 @@ def rocq_close(session_id: str) -> Dict[str, Any]:
         session = _registry.drop(session_id)
         session.close()
         return {"ok": True, "session_id": session_id, "closed": True}
-    except Exception:  # noqa: BLE001
-        return _err()
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 @mcp.tool(
     description=(
         "Advance or rewind the session so its state matches a position in\n"
-        "the buffer. `line` is 1-indexed; `col` is optional (defaults to\n"
+        "the buffer. `line` is 1-indexed; values past the end of the buffer\n"
+        "are clamped to EOF. `col` is optional (defaults to\n"
         "end-of-line).\n\n"
         "Semantics match Coqtail's `to_line`: every sentence whose terminator\n"
         "is at or before `(line, col)` will have been executed; everything\n"
@@ -223,8 +236,8 @@ def rocq_step_to(
                 "stderr": result.stderr,
             }
         )
-    except Exception:  # noqa: BLE001
-        return _err()
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 @mcp.tool(
@@ -275,8 +288,8 @@ def rocq_goals(
                 "full_output_written_to": full_output_written_to,
             }
         )
-    except Exception:  # noqa: BLE001
-        return _err()
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 @mcp.tool(
@@ -322,8 +335,8 @@ def rocq_query(
                 "full_output_written_to": full_output_written_to,
             }
         )
-    except Exception:  # noqa: BLE001
-        return _err()
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 @mcp.tool(description="Report whether one session is started.")
@@ -331,8 +344,8 @@ def rocq_status(session_id: str) -> Dict[str, Any]:
     try:
         session = _registry.get(session_id)
         return {"ok": True, "started": session.status()["started"]}
-    except Exception:  # noqa: BLE001
-        return _err()
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
 
 
 @mcp.tool(description="List the ids of all currently-open sessions.")

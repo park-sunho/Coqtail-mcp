@@ -17,8 +17,8 @@ strictly about **driving this particular MCP server correctly**.
 ## Tool summary
 
 All tools accept JSON and return JSON. Rejected tool calls never raise —
-they return exactly `{ok: false}`. Always check `ok` before reading any other
-fields.
+they return `{ok: false, error: "brief reason"}`. Always check `ok` before
+reading success-specific fields.
 
 | Tool | Purpose |
 |------|---------|
@@ -49,6 +49,7 @@ keeps a `coqidetop` subprocess alive.
 
 - `line` and `col` at the tool boundary are **1-indexed** (line 1 is the
   first line of the file; col 1 is the first column).
+- `line` values past the end of the buffer are accepted and clamped to EOF.
 - `col` is optional on `rocq_step_to`; when omitted, the server targets
   end-of-line (inclusive of any terminating `.`).
 - Coqtail's semantics are preserved on both sides: a sentence is kept iff
@@ -156,6 +157,7 @@ The MCP tools intentionally return small envelopes:
 - `rocq_goals`: `ok`, `summary`, `stderr`, `full_output_written_to`
 - `rocq_query`: `ok`, `success`, `message`, `stderr`, `full_output_written_to`
 - `rocq_status`: `ok`, `started`
+- Rejected tool calls: `ok`, `error`
 
 Optional fields are omitted when empty or absent. For example, successful
 steps omit `error`, `error_range`, and empty `stderr`; `rocq_start` omits empty
@@ -190,8 +192,8 @@ rocq_query(session_id="t1", query="Check no_such_name")
 ## Error handling
 
 `ok: false` means the MCP tool itself refused the call (unknown session,
-bad argument, …). The response is exactly `{ok: false}`; no diagnostic text is
-included in the tool result.
+bad argument, …). The response includes a compact `error` string with the
+reason.
 
 `ok: true` with `success: false` means Rocq *accepted* the call but
 *rejected* the input — e.g. a tactic failure or a syntax error. In that

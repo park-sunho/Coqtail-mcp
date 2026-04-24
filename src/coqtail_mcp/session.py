@@ -483,21 +483,22 @@ def _make_buffer(content: str) -> List[bytes]:
 def _resolve_target(buf: List[bytes], line: int, col: Optional[int]) -> Position:
     """Convert a user-facing (1-indexed line, optional 1-indexed col) to the
     0-indexed form Coqtail expects. When col is omitted, aim at end-of-line.
+    Lines past the buffer clamp to EOF.
     """
     if line < 1:
         raise SessionError(f"line must be >= 1, got {line}")
+    if col is not None and col < 1:
+        raise SessionError(f"col must be >= 1, got {col}")
+
+    tline = min(line, len(buf)) - 1
     if line > len(buf):
-        raise SessionError(
-            f"line {line} is past the buffer (which has {len(buf)} lines)"
-        )
-    tline = line - 1
+        return (tline, max(0, len(buf[tline]) - 1) if buf[tline] else 0)
+
     if col is None:
         # End of the line — use (line, len(line)-1) so the terminator dot on
         # that line is included, or 0 if the line is empty.
         tcol = max(0, len(buf[tline]) - 1) if buf[tline] else 0
     else:
-        if col < 1:
-            raise SessionError(f"col must be >= 1, got {col}")
         tcol = col - 1
     return (tline, tcol)
 

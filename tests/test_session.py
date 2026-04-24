@@ -23,7 +23,13 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from coqtail_mcp.session import RocqSession, SessionRegistry, SessionError, _make_buffer  # noqa: E402
+from coqtail_mcp.session import (  # noqa: E402
+    RocqSession,
+    SessionError,
+    SessionRegistry,
+    _make_buffer,
+    _resolve_target,
+)
 from coqtail_mcp.formatting import (  # noqa: E402
     apply_line_range,
     format_goals,
@@ -43,6 +49,13 @@ def test_offline_make_buffer_roundtrip() -> None:
 
 def test_offline_empty_buffer() -> None:
     assert _make_buffer("") == [b""]
+
+
+def test_offline_resolve_target_clamps_oversized_line_to_eof() -> None:
+    buf = _make_buffer("Theorem t : True.\nProof.\n  exact I.")
+
+    assert _resolve_target(buf, 99, None) == (2, 9)
+    assert _resolve_target(buf, 99, 1) == (2, 9)
 
 
 def test_offline_registry_create_and_drop() -> None:
@@ -151,23 +164,46 @@ def test_offline_truncate_strings_caps_each_string_entry() -> None:
     assert truncate_strings("abcdef", 2) == ".."
 
 
-def test_offline_server_ok_false_is_minimal(tmp_path) -> None:
+def test_offline_server_ok_false_has_brief_error(tmp_path) -> None:
     from coqtail_mcp import server as srv
 
     missing = tmp_path / "missing.v"
 
-    assert srv.rocq_start(file_path=str(missing)) == {"ok": False}
-    assert srv.rocq_close(session_id="missing") == {"ok": False}
-    assert srv.rocq_step_to(session_id="missing", line=1) == {"ok": False}
-    assert srv.rocq_goals(session_id="missing") == {"ok": False}
-    assert srv.rocq_query(session_id="missing", query="Check nat") == {"ok": False}
-    assert srv.rocq_status(session_id="missing") == {"ok": False}
-    assert srv.rocq_goals(session_id="missing", max_chars=0) == {"ok": False}
-    assert srv.rocq_query(
-        session_id="missing",
-        query="Check nat",
-        max_chars=-1,
-    ) == {"ok": False}
+    failures = [
+        srv.rocq_start(file_path=str(missing)),
+        srv.rocq_close(session_id="missing"),
+        srv.rocq_step_to(session_id="missing", line=1),
+        srv.rocq_goals(session_id="missing"),
+        srv.rocq_query(session_id="missing", query="Check nat"),
+        srv.rocq_status(session_id="missing"),
+        srv.rocq_goals(session_id="missing", max_chars=0),
+        srv.rocq_query(
+            session_id="missing",
+            query="Check nat",
+            max_chars=-1,
+        ),
+    ]
+
+    for result in failures:
+        assert set(result) == {"ok", "error"}
+        assert result["ok"] is False
+        assert isinstance(result["error"], str)
+        assert 0 < len(result["error"]) <= 300
+
+    assert "does not exist" in failures[0]["error"]
+    assert "no such session" in failures[1]["error"]
+    assert "positive integer" in failures[-1]["error"]
+
+
+def test_offline_server_ok_false_error_is_compact() -> None:
+    from coqtail_mcp import server as srv
+
+    result = srv._err(RuntimeError("first line\n" + ("x" * 400)))
+
+    assert result["ok"] is False
+    assert len(result["error"]) == 300
+    assert "\n" not in result["error"]
+    assert result["error"].endswith("...")
 
 
 # -------------------------------------------------------------------- live
@@ -280,6 +316,9 @@ def test_live_server_outputs_are_minimal() -> None:
         assert "error" not in r
         assert "error_range" not in r
         assert "stderr" not in r or r["stderr"] != ""
+
+        r = srv.rocq_step_to(session_id="minimal_outputs", line=999)
+        assert r["ok"] and r["success"], r
 
         r = srv.rocq_query(session_id="minimal_outputs",
                            query="Check no_such_identifier")
@@ -470,7 +509,8 @@ def test_live_reload_from_file_via_server(tmp_path) -> None:
         try:
             r = srv.rocq_step_to(session_id="reload_inline", line=1,
                                  reload_from_file=True)
-            assert r == {"ok": False}
+            assert r["ok"] is False
+            assert "inline content" in r["error"]
         finally:
             srv.rocq_close(session_id="reload_inline")
     finally:

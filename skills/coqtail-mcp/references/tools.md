@@ -8,7 +8,8 @@ compact envelopes so agents do not spend context on metadata they did not ask
 for. Optional fields are omitted when empty or absent; for example empty
 `stderr`, empty `startup_stderr`, `error: null`, `error_range: null`, and
 unnamed-goal `name: null` are not returned.
-When `ok` is `false`, the response is exactly `{ "ok": false }`.
+When `ok` is `false`, the response includes a compact `error` string with the
+reason.
 
 ---
 
@@ -52,7 +53,7 @@ starting.
 - `could not locate Rocq: ...` — no binary at `coq_path`/`$PATH`
 - `failed to start Rocq: Rocq timed out ...` — wrong binary or a dependency build is hanging; rerun with `init_timeout` bumped if you're sure it's slow-but-working
 
-These rejected tool calls return only `{ "ok": false }`.
+These rejected tool calls return `{ "ok": false, "error": "..." }`.
 
 ---
 
@@ -76,9 +77,9 @@ Terminate the subprocess and drop the session from the registry.
 
 - `no such session: 't1'` — already closed, or never opened
 
-Closing an unknown session is safe and returns `{ "ok": false }`. Always close
-sessions you opened; abandoned sessions keep `coqidetop` subprocesses alive
-until server shutdown.
+Closing an unknown session is safe and returns `{ "ok": false, "error": "..." }`.
+Always close sessions you opened; abandoned sessions keep `coqidetop`
+subprocesses alive until server shutdown.
 
 ---
 
@@ -93,7 +94,7 @@ admitted proofs triggered by `admit=true`).
 | Name               | Type   | Required | Notes |
 |--------------------|--------|----------|-------|
 | `session_id`       | string | yes      | |
-| `line`             | int    | yes      | 1-indexed. Must be within the buffer. |
+| `line`             | int    | yes      | 1-indexed. Values past the end of the buffer are clamped to EOF. |
 | `col`              | int    | no       | 1-indexed. Defaults to end-of-line (inclusive of any terminator on that line). |
 | `reload_from_file` | bool   | no       | Default `false`. When `true`, the server re-reads the `file_path` supplied to `rocq_start` and replaces the buffer before stepping. Only the sentences affected by the diff are rewound. Fails when the session was opened with inline `content` or when the file no longer exists. |
 | `admit`            | bool   | no       | Default `false`. When `true`, opaque proofs (`Qed.`/`Admitted.`) encountered during the advance are replaced with `Admitted.`. |
@@ -126,10 +127,9 @@ admitted proofs triggered by `admit=true`).
 **Common failures at the envelope level**
 
 - `session not started` — you skipped `rocq_start`
-- `line N is past the buffer (which has M lines)` — off-the-end
 - `line must be >= 1` / `col must be >= 1` — 0-indexed mistake
 
-These rejected tool calls return only `{ "ok": false }`.
+These rejected tool calls return `{ "ok": false, "error": "..." }`.
 
 ---
 
