@@ -72,8 +72,9 @@ class RocqSession:
         coq_path: Optional[str] = None,
         coq_prog: Optional[str] = None,
         extra_args: Optional[List[str]] = None,
-        build_system: str = "prefer-dune",
+        build_system: str = "prefer-coqproject",
         project_names: Optional[List[str]] = None,
+        project_search_dirs: Optional[List[str]] = None,
         dune_compile_deps: bool = False,
         stderr_is_warning: bool = True,
         init_timeout: Optional[int] = 60,
@@ -93,6 +94,9 @@ class RocqSession:
         self._build_system = build_system
         self._project_names = (
             list(project_names) if project_names is not None else None
+        )
+        self._project_search_dirs = (
+            list(project_search_dirs) if project_search_dirs is not None else None
         )
         self._dune_compile_deps = dune_compile_deps
         self._project_config: Optional[ProjectConfig] = None
@@ -136,6 +140,7 @@ class RocqSession:
                 extra_args=self._extra_args,
                 build_system=self._build_system,
                 project_names=self._project_names,
+                project_search_dirs=self._project_search_dirs,
             )
 
             err, stderr = self._coqtop.start(
@@ -428,6 +433,9 @@ class RocqSession:
                 "project_names": list(self._project_names)
                 if self._project_names is not None
                 else None,
+                "project_search_dirs": list(self._project_search_dirs)
+                if self._project_search_dirs is not None
+                else None,
                 "project_files": [],
                 "coqproject_args": [],
                 "launch_args": list(self._extra_args),
@@ -441,6 +449,7 @@ class RocqSession:
             "project_names": list(self._project_names)
             if self._project_names is not None
             else None,
+            "project_search_dirs": list(config.project_search_dirs),
             "project_files": list(config.project_files),
             "coqproject_args": list(config.coqproject_args),
             "launch_args": list(config.launch_args),

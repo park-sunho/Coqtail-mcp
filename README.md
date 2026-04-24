@@ -139,11 +139,12 @@ rocq_query(session_id="demo", query="Check nat")
 rocq_close(session_id="demo")
 ```
 
-For `file_path` sessions, `rocq_start` automatically searches upward for
-project settings. The default `build_system="prefer-dune"` uses Dune when a
-`dune-project` file is present, otherwise it reads `_CoqProject` and
-`_RocqProject` flags. Use `build_system="prefer-coqproject"`, `"dune"`, or
-`"coqproject"` to force the selection, and pass `extra_args` for final
+For `file_path` sessions, `rocq_start` automatically detects project settings.
+The default `build_system="prefer-coqproject"` uses `_CoqProject` or
+`_RocqProject` flags when found, otherwise it falls back to Dune. Project-file
+search first checks `.` and `./theories` relative to the current working
+directory, then searches upward from the file path. Use `build_system="dune"`
+or `"coqproject"` to force the selection, and pass `extra_args` for final
 overrides.
 
 ## Project layout

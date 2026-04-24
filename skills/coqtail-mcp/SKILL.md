@@ -217,14 +217,15 @@ against it.
    started with `file_path`; inline-content sessions must be reopened.
 
 6. **Project settings are auto-detected for `file_path` sessions.**
-   The default `build_system="prefer-dune"` uses Dune when a
-   `dune-project` file is found, otherwise it searches upward for
-   `_CoqProject` and `_RocqProject` files:
+   The default `build_system="prefer-coqproject"` uses `_CoqProject`
+   or `_RocqProject` files when found, otherwise it falls back to Dune.
+   Project-file search first checks `.` and `./theories` relative to
+   the current working directory, then searches upward from the file:
    ```
    rocq_start(..., file_path="/abs/proj/src/foo.v")
    ```
-   Use `build_system="prefer-coqproject"`, `"dune"`, or `"coqproject"`
-   to control precedence. Pass `extra_args` for final overrides.
+   Use `build_system="prefer-dune"`, `"dune"`, or `"coqproject"` to
+   control precedence. Pass `extra_args` for final overrides.
 
 7. **Output is plain text.** Richpp tags (syntax highlighting spans)
    are stripped. If the user specifically wants highlighting, that

@@ -199,11 +199,12 @@ for evaluation.
 
 ## 8. Handle project settings
 
-For `file_path` sessions, `rocq_start` automatically searches upward for
-project settings. The default `build_system="prefer-dune"` uses Dune when a
-`dune-project` file is present; otherwise it reads `_CoqProject` and
-`_RocqProject` files and passes their `-Q`/`-R`/`-I`/`-include`/`-arg`
-options to Rocq.
+For `file_path` sessions, `rocq_start` automatically detects project settings.
+The default `build_system="prefer-coqproject"` uses `_CoqProject` or
+`_RocqProject` files when found; otherwise it falls back to Dune. Project-file
+search first checks `.` and `./theories` relative to the current working
+directory, then searches upward from the file. Detected project files pass
+their `-Q`/`-R`/`-I`/`-include`/`-arg` options to Rocq.
 
 ```
 rocq_start(session_id="proj", file_path="/abs/proj/src/foo.v",
@@ -211,11 +212,13 @@ rocq_start(session_id="proj", file_path="/abs/proj/src/foo.v",
 ```
 
 Use these knobs when the default is not what you want:
-- `build_system="prefer-coqproject"` uses project files if any are found,
-  otherwise falls back to Dune.
+- `build_system="prefer-dune"` uses Dune when a `dune-project` is found,
+  otherwise falls back to project files.
 - `build_system="dune"` or `"coqproject"` forces one mode.
 - `project_names=["_CoqProject", "_CoqProject.local"]` customizes project
   files.
+- `project_search_dirs=[".", "./vendor"]` customizes directories checked
+  before upward search.
 - `extra_args=[...]` appends final overrides after detected args.
 
 ---

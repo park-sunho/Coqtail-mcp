@@ -2,9 +2,10 @@
 
 This mirrors Coqtail's Vim-side project handling:
 
-* search upward for ``_CoqProject`` / ``_RocqProject`` files;
+* check explicit directories for ``_CoqProject`` / ``_RocqProject`` files,
+  then search upward;
 * parse only the options that affect an interactive Rocq process;
-* prefer Dune by default when a ``dune-project`` file is present.
+* prefer project files over Dune by default.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Iterable, List, Optional, Sequence
 
 
 DEFAULT_PROJECT_NAMES = ["_CoqProject", "_RocqProject"]
+DEFAULT_PROJECT_SEARCH_DIRS = [".", "./theories"]
 BUILD_SYSTEMS = {"prefer-dune", "prefer-coqproject", "dune", "coqproject"}
 
 
@@ -28,6 +30,7 @@ class ProjectConfig:
     """Resolved project settings for one Rocq session."""
 
     build_system: str
+    project_search_dirs: List[str]
     project_files: List[str]
     coqproject_args: List[str]
     extra_args: List[str]
@@ -41,8 +44,9 @@ def resolve_project_config(
     filename: Optional[str],
     *,
     extra_args: Optional[Sequence[str]] = None,
-    build_system: str = "prefer-dune",
+    build_system: str = "prefer-coqproject",
     project_names: Optional[Sequence[str]] = None,
+    project_search_dirs: Optional[Sequence[str]] = None,
 ) -> ProjectConfig:
     """Find project settings and decide what to pass to ``coqidetop``.
 
@@ -64,6 +68,11 @@ def resolve_project_config(
             )
         return ProjectConfig(
             build_system=build_system,
+            project_search_dirs=list(
+                DEFAULT_PROJECT_SEARCH_DIRS
+                if project_search_dirs is None
+                else project_search_dirs
+            ),
             project_files=[],
             coqproject_args=[],
             extra_args=explicit_args,
@@ -74,7 +83,12 @@ def resolve_project_config(
 
     start_path = Path(filename).expanduser().resolve()
     names = list(DEFAULT_PROJECT_NAMES if project_names is None else project_names)
-    project_files = locate_project_files(start_path, names)
+    search_dirs = list(
+        DEFAULT_PROJECT_SEARCH_DIRS
+        if project_search_dirs is None
+        else project_search_dirs
+    )
+    project_files = locate_project_files(start_path, names, search_dirs=search_dirs)
     coqproject_args: List[str] = []
     for project_file in project_files:
         coqproject_args.extend(parse_coqproject(project_file))
@@ -94,6 +108,7 @@ def resolve_project_config(
     launch_args = explicit_args if use_dune else coqproject_args + explicit_args
     return ProjectConfig(
         build_system=build_system,
+        project_search_dirs=search_dirs,
         project_files=[str(path) for path in project_files],
         coqproject_args=coqproject_args,
         extra_args=explicit_args,
@@ -104,16 +119,42 @@ def resolve_project_config(
     )
 
 
-def locate_project_files(start_path: Path, project_names: Iterable[str]) -> List[Path]:
-    """Find the nearest project file for each requested project filename."""
+def locate_project_files(
+    start_path: Path,
+    project_names: Iterable[str],
+    *,
+    search_dirs: Optional[Iterable[str]] = None,
+) -> List[Path]:
+    """Find the first project file for each requested project filename.
+
+    Search directories are checked first, relative to the current working
+    directory unless absolute. If a project filename is not found there, fall
+    back to Coqtail's upward search from ``start_path``.
+    """
 
     start_dir = start_path if start_path.is_dir() else start_path.parent
+    dirs = DEFAULT_PROJECT_SEARCH_DIRS if search_dirs is None else list(search_dirs)
     files: List[Path] = []
     for name in project_names:
-        found = locate_upwards(start_dir, name)
+        found = locate_in_dirs(dirs, name)
+        if found is None:
+            found = locate_upwards(start_dir, name)
         if found is not None:
             files.append(found)
     return files
+
+
+def locate_in_dirs(search_dirs: Iterable[str], name: str) -> Optional[Path]:
+    """Search explicit directories for ``name`` in order."""
+
+    for search_dir in search_dirs:
+        base = Path(search_dir).expanduser()
+        if not base.is_absolute():
+            base = Path.cwd() / base
+        candidate = (base / name).resolve()
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def locate_upwards(start_dir: Path, name: str) -> Optional[Path]:

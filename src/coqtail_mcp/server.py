@@ -91,9 +91,10 @@ def _resolve_content(
         "≥ 8.9 (plain `coqtop` no longer speaks the IDE protocol on those\n"
         "versions and will hang).\n\n"
         "Project settings are auto-detected for `file_path` sessions. By\n"
-        "default, `build_system='prefer-dune'` uses Dune when a `dune-project`\n"
-        "is found, otherwise it searches upward for `_CoqProject` and\n"
-        "`_RocqProject`. `extra_args` are appended last and passed through to\n"
+        "default, `build_system='prefer-coqproject'` uses project files when\n"
+        "found, otherwise it falls back to Dune. Project file search first\n"
+        "checks `.` and `./theories`, then searches upward for `_CoqProject`\n"
+        "and `_RocqProject`. `extra_args` are appended last and passed through to\n"
         "the Rocq process. `init_timeout` caps the initial\n"
         "handshake in seconds (default 60); pass 0 or a large number to\n"
         "disable it."
@@ -106,8 +107,9 @@ def rocq_start(
     coq_path: Optional[str] = None,
     coq_prog: Optional[str] = None,
     extra_args: Optional[List[str]] = None,
-    build_system: str = "prefer-dune",
+    build_system: str = "prefer-coqproject",
     project_names: Optional[List[str]] = None,
+    project_search_dirs: Optional[List[str]] = None,
     dune_compile_deps: bool = False,
     strict_stderr: bool = False,
     init_timeout: Optional[int] = 60,
@@ -123,6 +125,7 @@ def rocq_start(
             extra_args=extra_args,
             build_system=build_system,
             project_names=project_names,
+            project_search_dirs=project_search_dirs,
             dune_compile_deps=dune_compile_deps,
             stderr_is_warning=not strict_stderr,
             init_timeout=init_timeout,

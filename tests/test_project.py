@@ -75,7 +75,25 @@ def test_locate_project_files_searches_upward_per_name(tmp_path: Path) -> None:
     ]
 
 
-def test_resolve_project_config_prefers_dune_by_default(tmp_path: Path) -> None:
+def test_locate_project_files_checks_default_dirs_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "theories").mkdir()
+    theories_project = tmp_path / "theories" / "_CoqProject"
+    theories_project.write_text("-arg theories\n", encoding="utf-8")
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    upward_project = source_dir / "_CoqProject"
+    upward_project.write_text("-arg upward\n", encoding="utf-8")
+    source = source_dir / "F.v"
+    source.write_text("Check nat.\n", encoding="utf-8")
+
+    assert locate_project_files(source, ["_CoqProject"]) == [theories_project]
+
+
+def test_resolve_project_config_prefers_coqproject_by_default(tmp_path: Path) -> None:
     (tmp_path / "dune-project").write_text("(lang dune 3.0)\n", encoding="utf-8")
     project = tmp_path / "_CoqProject"
     project.write_text("-Q theories My.Project\n", encoding="utf-8")
@@ -87,6 +105,45 @@ def test_resolve_project_config_prefers_dune_by_default(tmp_path: Path) -> None:
     config = resolve_project_config(str(source), extra_args=["-w", "all"])
 
     assert config.in_dune_project is True
+    assert config.use_dune is False
+    assert config.project_files == [str(project.resolve())]
+    assert config.launch_args == [
+        "-Q",
+        str(source_dir.resolve()),
+        "My.Project",
+        "-w",
+        "all",
+    ]
+
+
+def test_resolve_project_config_uses_dune_when_no_project_file(tmp_path: Path) -> None:
+    (tmp_path / "dune-project").write_text("(lang dune 3.0)\n", encoding="utf-8")
+    source = tmp_path / "F.v"
+    source.write_text("Check nat.\n", encoding="utf-8")
+
+    config = resolve_project_config(str(source), extra_args=["-w", "all"])
+
+    assert config.in_dune_project is True
+    assert config.use_dune is True
+    assert config.project_files == []
+    assert config.launch_args == ["-w", "all"]
+
+
+def test_resolve_project_config_can_prefer_dune(tmp_path: Path) -> None:
+    (tmp_path / "dune-project").write_text("(lang dune 3.0)\n", encoding="utf-8")
+    project = tmp_path / "_CoqProject"
+    project.write_text("-Q theories My.Project\n", encoding="utf-8")
+    source_dir = tmp_path / "theories"
+    source_dir.mkdir()
+    source = source_dir / "F.v"
+    source.write_text("Check nat.\n", encoding="utf-8")
+
+    config = resolve_project_config(
+        str(source),
+        extra_args=["-w", "all"],
+        build_system="prefer-dune",
+    )
+
     assert config.use_dune is True
     assert config.project_files == [str(project.resolve())]
     assert config.launch_args == ["-w", "all"]
