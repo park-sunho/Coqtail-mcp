@@ -16,9 +16,9 @@ strictly about **driving this particular MCP server correctly**.
 
 ## Tool summary
 
-All tools accept JSON and return JSON. Errors never raise — they come
-back with `ok: false` in the tool's normal response shape. Always check
-`ok` before reading success fields.
+All tools accept JSON and return JSON. Rejected tool calls never raise —
+they return exactly `{ok: false}`. Always check `ok` before reading any other
+fields.
 
 | Tool | Purpose |
 |------|---------|
@@ -64,27 +64,29 @@ keeps a `coqidetop` subprocess alive.
 ```
 rocq_start(session_id="t1", file_path="/abs/path/to/proof.v",
            coq_path="/abs/path/to/_opam/bin")
-  → { ok: true, session_id: "t1", startup_stderr: "" }
+  → { ok: true, session_id: "t1" }
 
 rocq_step_to(session_id="t1", line=12)
-  → { ok: true, success: true, endpoint: [12, 8],
-      error: null, error_range: null, stderr: "" }
+  → { ok: true, success: true, endpoint: [12, 8] }
 
 rocq_goals(session_id="t1")
   → { ok: true,
       summary: { in_proof: true, fg: [{hypotheses: ["n : nat"],
-                                       conclusion: "n + 0 = n"}], ... },
-      stderr: "" }
+                                       conclusion: "n + 0 = n"}], ... } }
 
 rocq_goals(session_id="t1", range=[-5, -1])
   → returns only the final five hypotheses in each focused goal. Positive
-    values are 1-indexed; negative values count from the bottom.
+    values are 1-indexed; negative values count from the bottom. Each focused
+    goal also includes `hypothesis_count`.
 
 rocq_close(session_id="t1")
 ```
 
 `summary.fg[i]` gives the hypothesis list and conclusion as separate
 strings if you need to reason about them programmatically.
+If the full context might be large, first consider calling
+`rocq_goals(..., range=[-20, -1])` or another narrow hypothesis range to save
+context. Expand to the full context only when the omitted hypotheses matter.
 
 ### Stream through a proof one tactic at a time
 
@@ -140,6 +142,11 @@ The MCP tools intentionally return small envelopes:
 - `rocq_query`: `ok`, `success`, `message`, `stderr`
 - `rocq_status`: `ok`, `started`
 
+Optional fields are omitted when empty or absent. For example, successful
+steps omit `error`, `error_range`, and empty `stderr`; `rocq_start` omits empty
+`startup_stderr`; unnamed goals omit `name`.
+If `ok` is `false`, no other fields are returned.
+
 Per-sentence info-panel messages are kept internally by the session layer but
 are not exposed through the MCP tool response.
 
@@ -149,25 +156,21 @@ Example:
 rocq_step_to(session_id="t1", line=5)   # file has: idtac "checkpoint reached".
   → {
       ok: true, success: true,
-      endpoint: [5, 35],
-      error: null,
-      error_range: null,
-      stderr: ""
+      endpoint: [5, 35]
     }
 
 rocq_query(session_id="t1", query="Check no_such_name")
   → {
       ok: true, success: false,
-      message: "The reference no_such_name was not found …",
-      stderr: ""
+      message: "The reference no_such_name was not found …"
     }
 ```
 
 ## Error handling
 
 `ok: false` means the MCP tool itself refused the call (unknown session,
-bad argument, …). The server raised `SessionError` and wrapped it into
-the envelope.
+bad argument, …). The response is exactly `{ok: false}`; no diagnostic text is
+included in the tool result.
 
 `ok: true` with `success: false` means Rocq *accepted* the call but
 *rejected* the input — e.g. a tactic failure or a syntax error. In that
@@ -180,7 +183,7 @@ blindly; inspect `error` and adjust the buffer or tactic before calling
 { ok: true, success: false,
   error: "The reference foo was not found in the current environment.",
   error_range: [[42, 1], [42, 12]],
-  endpoint: [41, 14], stderr: "" }
+  endpoint: [41, 14] }
 ```
 
 If a `rocq_step_to` fails mid-batch, the endpoint reflects the last

@@ -187,13 +187,15 @@ def summarize_goals(
         return {
             "in_proof": True,
             "fg": [
-                {
-                    "name": g.name,
-                    "hypothesis_count": len(g.hyp),
-                    "conclusion_line_count": len(
-                        _flatten(g.ccl).splitlines() or [""]
-                    ),
-                }
+                _omit_empty(
+                    {
+                        "name": g.name,
+                        "hypothesis_count": len(g.hyp),
+                        "conclusion_line_count": len(
+                            _flatten(g.ccl).splitlines() or [""]
+                        ),
+                    }
+                )
                 for g in goals.fg
             ],
             "details_included": False,
@@ -205,17 +207,27 @@ def summarize_goals(
     return {
         "in_proof": True,
         "fg": [
-            {
-                "name": g.name,
-                "hypotheses": apply_item_range(
-                    [_flatten(h) for h in g.hyp],
-                    hypothesis_range,
-                ),
-                "conclusion": _flatten(g.ccl),
-            }
+            _summarize_goal(g, hypothesis_range)
             for g in goals.fg
         ],
         "bg_count": sum(len(level) for level in goals.bg),
         "shelved": len(goals.shelved),
         "given_up": len(goals.given_up),
     }
+
+
+def _summarize_goal(goal: Any, hypothesis_range: Optional[Sequence[int]]) -> dict:
+    hypotheses = [_flatten(h) for h in goal.hyp]
+    summary = {
+        "name": goal.name,
+        "hypotheses": apply_item_range(hypotheses, hypothesis_range),
+        "conclusion": _flatten(goal.ccl),
+    }
+    if hypothesis_range is not None:
+        summary["hypothesis_count"] = len(hypotheses)
+    return _omit_empty(summary)
+
+
+def _omit_empty(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop absent optional values from compact public summaries."""
+    return {k: v for k, v in data.items() if v is not None and v != ""}

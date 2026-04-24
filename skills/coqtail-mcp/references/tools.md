@@ -5,7 +5,10 @@ Per-tool inputs, outputs, and failure modes. Paired with
 
 All tools return a JSON object with an `ok` boolean. The primary tools expose
 compact envelopes so agents do not spend context on metadata they did not ask
-for.
+for. Optional fields are omitted when empty or absent; for example empty
+`stderr`, empty `startup_stderr`, `error: null`, `error_range: null`, and
+unnamed-goal `name: null` are not returned.
+When `ok` is `false`, the response is exactly `{ "ok": false }`.
 
 ---
 
@@ -35,10 +38,12 @@ Spawn a `coqidetop` subprocess and create a new session.
 ```json
 {
   "ok": true,
-  "session_id": "t1",
-  "startup_stderr": ""
+  "session_id": "t1"
 }
 ```
+
+`startup_stderr` is included only when Rocq writes something meaningful while
+starting.
 
 **Common failures**
 
@@ -46,6 +51,8 @@ Spawn a `coqidetop` subprocess and create a new session.
 - `provide either file_path or content, not both` — passed both
 - `could not locate Rocq: ...` — no binary at `coq_path`/`$PATH`
 - `failed to start Rocq: Rocq timed out ...` — wrong binary or a dependency build is hanging; rerun with `init_timeout` bumped if you're sure it's slow-but-working
+
+These rejected tool calls return only `{ "ok": false }`.
 
 ---
 
@@ -69,9 +76,9 @@ Terminate the subprocess and drop the session from the registry.
 
 - `no such session: 't1'` — already closed, or never opened
 
-Closing an unknown session is safe (just reports the error). Always
-close sessions you opened; abandoned sessions keep `coqidetop`
-subprocesses alive until server shutdown.
+Closing an unknown session is safe and returns `{ "ok": false }`. Always close
+sessions you opened; abandoned sessions keep `coqidetop` subprocesses alive
+until server shutdown.
 
 ---
 
@@ -97,17 +104,16 @@ admitted proofs triggered by `admit=true`).
 {
   "ok": true,
   "success": true,
-  "endpoint": [12, 8],
-  "error": null,
-  "error_range": null,
-  "stderr": ""
+  "endpoint": [12, 8]
 }
 ```
 
 - `success` is `false` if Rocq rejected a sentence. `endpoint` still
   reflects the last **successful** position; the session is fully
   consistent with that state.
-- `error_range` is 1-indexed `[[start_line, start_col], [end_line, end_col]]`.
+- On failure, `error` contains Rocq's message and `error_range` is 1-indexed
+  `[[start_line, start_col], [end_line, end_col]]`.
+- `stderr` is included only when non-empty.
 
 **Semantics**
 
@@ -122,6 +128,8 @@ admitted proofs triggered by `admit=true`).
 - `session not started` — you skipped `rocq_start`
 - `line N is past the buffer (which has M lines)` — off-the-end
 - `line must be >= 1` / `col must be >= 1` — 0-indexed mistake
+
+These rejected tool calls return only `{ "ok": false }`.
 
 ---
 
@@ -145,20 +153,22 @@ current endpoint.
   "summary": {
     "in_proof": true,
     "fg": [
-      { "name": null,
-        "hypotheses": ["n : nat"],
+      { "hypotheses": ["n : nat"],
         "conclusion": "n + 0 = n" }
     ],
     "bg_count": 0,
     "shelved": 0,
     "given_up": 0
-  },
-  "stderr": ""
+  }
 }
 ```
 
 - `range=[start, end]` slices `summary.fg[*].hypotheses` only. Conclusions
-  and goal counts are still returned.
+  and goal counts are still returned. When `range` is used, each focused goal
+  also includes `hypothesis_count`, so agents can tell whether more hypotheses
+  existed than were returned.
+- `name` is included only for named goals.
+- `stderr` is included only when non-empty.
 - `summary.fg` lists the **focused** goals — those the user's next tactic
   will act on. `summary.bg_count`, `shelved`, `given_up` give counts
   without details (use the MathComp/stdlib tactics `unshelve`, etc. to
@@ -184,13 +194,13 @@ Run a query that does not change the proof state.
 {
   "ok": true,
   "success": true,
-  "message": "nat\n     : Set",
-  "stderr": ""
+  "message": "nat\n     : Set"
 }
 ```
 
 When Rocq rejects the query (e.g. unknown identifier), `success` is
-`false` and `message` contains Rocq's error text.
+`false` and `message` contains Rocq's error text. `stderr` is included only
+when non-empty.
 
 **Important**: `rocq_query` does not consume a state_id — it runs
 relative to the current position without advancing. Repeated queries
@@ -200,7 +210,7 @@ are free.
 
 ## `rocq_status`
 
-Inspect metadata about a session without modifying it.
+Report whether a session is currently started without modifying it.
 
 **Returns**
 

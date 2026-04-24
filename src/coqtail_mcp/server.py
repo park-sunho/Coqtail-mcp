@@ -33,9 +33,19 @@ atexit.register(_registry.close_all)
 mcp = FastMCP("coqtail-mcp")
 
 
-def _err(e: Exception) -> Dict[str, Any]:
-    """Error envelope for tools that do not define a compact error shape."""
-    return {"ok": False, "error": str(e), "error_type": type(e).__name__}
+def _err() -> Dict[str, Any]:
+    """Minimal envelope for rejected tool calls."""
+    return {"ok": False}
+
+
+def _omit_empty_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop optional response fields when they do not carry information."""
+    empty_optional_fields = {"error", "error_range", "stderr", "startup_stderr"}
+    return {
+        key: value
+        for key, value in data.items()
+        if key not in empty_optional_fields or (value is not None and value != "")
+    }
 
 
 def _resolve_content(
@@ -90,7 +100,6 @@ def rocq_start(
     strict_stderr: bool = False,
     init_timeout: Optional[int] = 60,
 ) -> Dict[str, Any]:
-    public_session_id = session_id
     try:
         buffer, resolved = _resolve_content(file_path, content)
         session = _registry.create(
@@ -107,30 +116,27 @@ def rocq_start(
             stderr_is_warning=not strict_stderr,
             init_timeout=init_timeout,
         )
-        public_session_id = session.session_id
         try:
             info = session.start()
         except Exception:
             _registry.drop(session.session_id).close()
             raise
-        return {
-            "ok": True,
-            "session_id": info["session_id"],
-            "startup_stderr": info["startup_stderr"],
-        }
-    except Exception as e:  # noqa: BLE001
-        return {
-            "ok": False,
-            "session_id": public_session_id,
-            "startup_stderr": str(e),
-        }
+        return _omit_empty_fields(
+            {
+                "ok": True,
+                "session_id": info["session_id"],
+                "startup_stderr": info["startup_stderr"],
+            }
+        )
+    except Exception:  # noqa: BLE001
+        return _err()
 
 
 @mcp.tool(
     description=(
         "Close a session. The underlying coqidetop subprocess is terminated\n"
         "and its state is dropped. Safe to call on an unknown id (returns\n"
-        "`ok: false` with a descriptive error)."
+        "`ok: false`)."
     )
 )
 def rocq_close(session_id: str) -> Dict[str, Any]:
@@ -138,8 +144,8 @@ def rocq_close(session_id: str) -> Dict[str, Any]:
         session = _registry.drop(session_id)
         session.close()
         return {"ok": True, "session_id": session_id, "closed": True}
-    except Exception as e:  # noqa: BLE001
-        return _err(e)
+    except Exception:  # noqa: BLE001
+        return _err()
 
 
 @mcp.tool(
@@ -172,23 +178,18 @@ def rocq_step_to(
         if reload_from_file:
             session.reload_buffer_from_file()
         result = session.step_to(line, col, admit=admit)
-        return {
-            "ok": True,
-            "success": result.success,
-            "endpoint": result.endpoint,
-            "error": result.error,
-            "error_range": result.error_range,
-            "stderr": result.stderr,
-        }
-    except Exception as e:  # noqa: BLE001
-        return {
-            "ok": False,
-            "success": False,
-            "endpoint": None,
-            "error": str(e),
-            "error_range": None,
-            "stderr": "",
-        }
+        return _omit_empty_fields(
+            {
+                "ok": True,
+                "success": result.success,
+                "endpoint": result.endpoint,
+                "error": result.error,
+                "error_range": result.error_range,
+                "stderr": result.stderr,
+            }
+        )
+    except Exception:  # noqa: BLE001
+        return _err()
 
 
 @mcp.tool(
@@ -208,24 +209,15 @@ def rocq_goals(session_id: str, range: Optional[List[int]] = None) -> Dict[str, 
     try:
         session = _registry.get(session_id)
         goals, _message, stderr = session.goals_text()
-        return {
-            "ok": True,
-            "summary": summarize_goals(goals, hypothesis_range=range),
-            "stderr": stderr,
-        }
-    except Exception as e:  # noqa: BLE001
-        return {
-            "ok": False,
-            "summary": {
-                "in_proof": False,
-                "fg": [],
-                "bg_count": 0,
-                "shelved": 0,
-                "given_up": 0,
-                "error": str(e),
-            },
-            "stderr": "",
-        }
+        return _omit_empty_fields(
+            {
+                "ok": True,
+                "summary": summarize_goals(goals, hypothesis_range=range),
+                "stderr": stderr,
+            }
+        )
+    except Exception:  # noqa: BLE001
+        return _err()
 
 
 @mcp.tool(
@@ -240,19 +232,16 @@ def rocq_query(session_id: str, query: str) -> Dict[str, Any]:
     try:
         session = _registry.get(session_id)
         res = session.query(query)
-        return {
-            "ok": True,
-            "success": res.success,
-            "message": res.message,
-            "stderr": res.stderr,
-        }
-    except Exception as e:  # noqa: BLE001
-        return {
-            "ok": False,
-            "success": False,
-            "message": str(e),
-            "stderr": "",
-        }
+        return _omit_empty_fields(
+            {
+                "ok": True,
+                "success": res.success,
+                "message": res.message,
+                "stderr": res.stderr,
+            }
+        )
+    except Exception:  # noqa: BLE001
+        return _err()
 
 
 @mcp.tool(description="Report whether one session is started.")
@@ -261,7 +250,7 @@ def rocq_status(session_id: str) -> Dict[str, Any]:
         session = _registry.get(session_id)
         return {"ok": True, "started": session.status()["started"]}
     except Exception:  # noqa: BLE001
-        return {"ok": False, "started": False}
+        return _err()
 
 
 @mcp.tool(description="List the ids of all currently-open sessions.")

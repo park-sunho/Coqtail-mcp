@@ -112,7 +112,7 @@ def test_offline_summarize_goals_can_omit_details() -> None:
 
 def test_offline_summarize_goals_can_slice_hypotheses() -> None:
     goals = Goals(
-        [Goal(["H1 : nat", "H2 : bool", "H3 : Prop"], "True", "g")],
+        [Goal(["H1 : nat", "H2 : bool", "H3 : Prop"], "True", None)],
         [],
         [],
         [],
@@ -121,11 +121,24 @@ def test_offline_summarize_goals_can_slice_hypotheses() -> None:
     summary = summarize_goals(goals, hypothesis_range=[-2, -1])
     assert summary["fg"] == [
         {
-            "name": "g",
             "hypotheses": ["H2 : bool", "H3 : Prop"],
             "conclusion": "True",
+            "hypothesis_count": 3,
         }
     ]
+
+
+def test_offline_server_ok_false_is_minimal(tmp_path) -> None:
+    from coqtail_mcp import server as srv
+
+    missing = tmp_path / "missing.v"
+
+    assert srv.rocq_start(file_path=str(missing)) == {"ok": False}
+    assert srv.rocq_close(session_id="missing") == {"ok": False}
+    assert srv.rocq_step_to(session_id="missing", line=1) == {"ok": False}
+    assert srv.rocq_goals(session_id="missing") == {"ok": False}
+    assert srv.rocq_query(session_id="missing", query="Check nat") == {"ok": False}
+    assert srv.rocq_status(session_id="missing") == {"ok": False}
 
 
 # -------------------------------------------------------------------- live
@@ -225,28 +238,36 @@ def test_live_server_outputs_are_minimal() -> None:
                        coq_path=COQ_PATH, coq_prog=COQ_PROG)
     try:
         assert r["ok"], r
-        assert set(r) == {"ok", "session_id", "startup_stderr"}
+        assert set(r).issubset({"ok", "session_id", "startup_stderr"})
+        assert {"ok", "session_id"} <= set(r)
+        assert "startup_stderr" not in r or r["startup_stderr"] != ""
 
         r = srv.rocq_step_to(session_id="minimal_outputs", line=3)
         assert r["success"]
-        assert set(r) == {
-            "ok",
-            "success",
-            "endpoint",
-            "error",
-            "error_range",
-            "stderr",
-        }
+        assert set(r).issubset(
+            {"ok", "success", "endpoint", "error", "error_range", "stderr"}
+        )
+        assert {"ok", "success", "endpoint"} <= set(r)
+        assert "error" not in r
+        assert "error_range" not in r
+        assert "stderr" not in r or r["stderr"] != ""
 
         r = srv.rocq_query(session_id="minimal_outputs",
                            query="Check no_such_identifier")
-        assert set(r) == {"ok", "success", "message", "stderr"}
+        assert set(r).issubset({"ok", "success", "message", "stderr"})
+        assert {"ok", "success", "message"} <= set(r)
         assert r["success"] is False
         assert "not found" in r["message"], r["message"]
+        assert "stderr" not in r or r["stderr"] != ""
 
         r = srv.rocq_goals(session_id="minimal_outputs", range=[-1, -1])
-        assert set(r) == {"ok", "summary", "stderr"}
-        hypotheses = r["summary"]["fg"][0]["hypotheses"]
+        assert set(r).issubset({"ok", "summary", "stderr"})
+        assert {"ok", "summary"} <= set(r)
+        assert "stderr" not in r or r["stderr"] != ""
+        goal = r["summary"]["fg"][0]
+        assert "name" not in goal
+        assert goal["hypothesis_count"] == 4
+        hypotheses = goal["hypotheses"]
         assert len(hypotheses) == 1
         assert "HC" in hypotheses[0]
 
@@ -344,8 +365,7 @@ def test_live_reload_from_file_via_server(tmp_path) -> None:
         try:
             r = srv.rocq_step_to(session_id="reload_inline", line=1,
                                  reload_from_file=True)
-            assert r["ok"] is False
-            assert "inline content" in r["error"]
+            assert r == {"ok": False}
         finally:
             srv.rocq_close(session_id="reload_inline")
     finally:

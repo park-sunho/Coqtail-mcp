@@ -120,27 +120,31 @@ having to prompt for it.
 
 ```
 rocq_start(session_id="demo", file_path="demo.v")
-# → { ok: true, session_id: "demo", startup_stderr: "" }
+# → { ok: true, session_id: "demo" }
 
 rocq_step_to(session_id="demo", line=6)
-# → { ok: true, success: true, endpoint: [6, 7],
-#     error: null, error_range: null, stderr: "" }
+# → { ok: true, success: true, endpoint: [6, 7] }
 
 rocq_goals(session_id="demo")
 # → {
+#     ok: true,
 #     summary: { in_proof: true, fg: [...], ... }
-#     stderr: ""
 #   }
 
 rocq_goals(session_id="demo", range=[-5, -1])
-# → returns only the last five hypotheses in each focused goal. Positive range
-#   values are 1-indexed; negative values count from the bottom.
+# → returns only the last five hypotheses in each focused goal, plus
+#   hypothesis_count so agents can tell more hypotheses existed.
 
 rocq_query(session_id="demo", query="Check nat")
-# → { ok: true, success: true, message: "nat : Set", stderr: "" }
+# → { ok: true, success: true, message: "nat : Set" }
 
 rocq_close(session_id="demo")
 ```
+
+Optional response fields such as `startup_stderr`, `stderr`, `error`, and
+`error_range` are omitted when they would be empty or `null`. Goal `name` is
+omitted for unnamed goals.
+If a tool call itself is rejected, the response is only `{ ok: false }`.
 
 For `file_path` sessions, `rocq_start` automatically detects project settings.
 The default `build_system="prefer-coqproject"` uses `_CoqProject` or
