@@ -114,7 +114,10 @@ def truncate_strings(value: Any, max_chars: Optional[int]) -> Any:
     if max_chars is None:
         return value
     if isinstance(value, str):
-        return value[:max_chars]
+        if len(value) <= max_chars:
+            return value
+        suffix = "..."[:max_chars]
+        return value[: max_chars - len(suffix)] + suffix
     if isinstance(value, list):
         return [truncate_strings(item, max_chars) for item in value]
     if isinstance(value, tuple):

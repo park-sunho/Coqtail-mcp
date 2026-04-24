@@ -152,7 +152,8 @@ Optional response fields such as `startup_stderr`, `stderr`, `error`, and
 omitted for unnamed goals.
 If a tool call itself is rejected, the response is only `{ ok: false }`.
 For `rocq_goals` and `rocq_query`, `max_chars` is a positive integer that caps
-each emitted string value independently with hard truncation and no ellipsis.
+each emitted string value independently. Truncated strings end with `...`,
+with the suffix included inside the character limit.
 
 For `file_path` sessions, `rocq_start` automatically detects project settings.
 The default `build_system="prefer-coqproject"` uses `_CoqProject` or

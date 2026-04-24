@@ -142,11 +142,12 @@ def test_offline_truncate_strings_caps_each_string_entry() -> None:
     }
 
     assert truncate_strings(value, 4) == {
-        "hypotheses": ["abcd", "xyz"],
-        "conclusion": "long",
-        "nested": [{"name": "goal"}],
+        "hypotheses": ["a...", "xyz"],
+        "conclusion": "l...",
+        "nested": [{"name": "g..."}],
         "count": 3,
     }
+    assert truncate_strings("abcdef", 2) == ".."
 
 
 def test_offline_server_ok_false_is_minimal(tmp_path) -> None:
@@ -315,6 +316,7 @@ def test_live_server_outputs_are_minimal() -> None:
         )
         assert r["success"]
         assert len(r["message"]) <= 5
+        assert r["message"].endswith("...")
 
         r = srv.rocq_status(session_id="minimal_outputs")
         assert r == {"ok": True, "started": True}

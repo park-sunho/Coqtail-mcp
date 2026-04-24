@@ -153,7 +153,8 @@ steps omit `error`, `error_range`, and empty `stderr`; `rocq_start` omits empty
 `startup_stderr`; unnamed goals omit `name`.
 If `ok` is `false`, no other fields are returned.
 For `rocq_goals` and `rocq_query`, `max_chars` is a positive integer that caps
-each emitted string value independently with hard truncation and no ellipsis.
+each emitted string value independently. Truncated strings end with `...`,
+with the suffix included inside the character limit.
 
 Per-sentence info-panel messages are kept internally by the session layer but
 are not exposed through the MCP tool response.
