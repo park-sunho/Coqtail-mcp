@@ -85,14 +85,21 @@ about them programmatically.
 ### Stream through a proof one tactic at a time
 
 Do not send a full `Add` for each keystroke — instead, write each new
-tactic into the buffer via `new_content` and ask `rocq_step_to` to catch
-up. The server diffs the buffer and rewinds only what's necessary.
+tactic into the `.v` file on disk and ask `rocq_step_to` to catch up
+with `reload_from_file=true`. The server re-reads the `file_path` that
+was supplied to `rocq_start`, diffs it against the in-memory buffer, and
+rewinds only what's necessary.
 
 ```
-rocq_step_to(session_id="t1", line=15, new_content="<file with new line 15>")
+# ...edit the .v file on disk...
+rocq_step_to(session_id="t1", line=15, reload_from_file=true)
 rocq_goals(session_id="t1")
-# decide next tactic based on the goal, edit buffer, repeat
+# decide next tactic based on the goal, edit file, repeat
 ```
+
+This requires the session to have been opened with `file_path` (not
+inline `content`). For inline-content sessions, open a fresh session
+when the source changes.
 
 ### Query without disturbing state
 
@@ -204,9 +211,10 @@ against it.
 
 5. **The session's buffer is independent from the agent's Read cache.**
    After you edit a file on disk with Edit/Write, subsequent
-   `rocq_step_to` calls still see the buffer the server loaded. Use
-   `new_content` on `rocq_step_to` (or reload via a new session) to
-   push changes.
+   `rocq_step_to` calls still see the buffer the server loaded. Pass
+   `reload_from_file=true` on `rocq_step_to` (or open a new session) to
+   push changes. `reload_from_file` only works when the session was
+   started with `file_path`; inline-content sessions must be reopened.
 
 6. **`_CoqProject` flags are not auto-detected.** Pass logical-path
    flags via `extra_args` when starting:

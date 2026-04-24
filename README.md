@@ -29,7 +29,7 @@ already work. This project only adds:
 |------|--------------|
 | `rocq_start`   | Spawn a `coqidetop` subprocess. Accepts either `file_path` or inline `content`. Returns the detected Rocq version. |
 | `rocq_close`   | Terminate a session's subprocess and forget it. |
-| `rocq_step_to` | Advance or rewind so the session's state matches `(line, col)`. Optionally replaces the buffer first (`new_content`) and/or admits opaque proofs (`admit`). |
+| `rocq_step_to` | Advance or rewind so the session's state matches `(line, col)`. Optionally re-reads the original `file_path` from disk (`reload_from_file`) and/or admits opaque proofs (`admit`). |
 | `rocq_goals`   | Return the current proof goal and hypothesis context, both as plain text and as a structured summary. |
 | `rocq_query`   | Run a non-state-changing query (`Check`, `Print`, `Search`, …). |
 | `rocq_status`  | Inspect one session (version, sentence count, endpoint). |

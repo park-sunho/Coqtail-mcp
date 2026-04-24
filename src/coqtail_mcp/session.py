@@ -20,6 +20,7 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from . import _COQTAIL_LIB_DIR  # noqa: F401  ensure sys.path shim is applied
@@ -78,6 +79,10 @@ class RocqSession:
         # If the caller didn't give one, invent a throwaway that still looks
         # like a .v file so Rocq's module-name validation is happy.
         self.filename = filename or f"Top_{session_id}.v"
+        # Remember whether the buffer originated from a real file on disk,
+        # so ``rocq_step_to(reload_from_file=True)`` knows where to re-read.
+        # ``None`` when the session was seeded with inline ``content``.
+        self.source_path: Optional[str] = filename
         self._coq_path = coq_path
         self._coq_prog = coq_prog
         self._extra_args = list(extra_args or [])
@@ -165,6 +170,25 @@ class RocqSession:
 
     def buffer_text(self) -> str:
         return b"\n".join(self.buffer).decode("utf-8", errors="replace")
+
+    def reload_buffer_from_file(self) -> None:
+        """Re-read :attr:`source_path` from disk and update the buffer.
+
+        Raises :class:`SessionError` when the session was seeded with inline
+        content (no file path to reload from) or when the recorded path no
+        longer exists.
+        """
+        if self.source_path is None:
+            raise SessionError(
+                "cannot reload_from_file: session was opened with inline "
+                "content, not a file_path"
+            )
+        path = Path(self.source_path)
+        if not path.is_file():
+            raise SessionError(
+                f"cannot reload_from_file: source path no longer exists: {path}"
+            )
+        self.set_buffer(path.read_text(encoding="utf-8"))
 
     # ------------------------------------------------------------------- steps
     def step_to(

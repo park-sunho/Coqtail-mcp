@@ -152,8 +152,11 @@ def rocq_close(session_id: str) -> Dict[str, Any]:
         "Semantics match Coqtail's `to_line`: every sentence whose terminator\n"
         "is at or before `(line, col)` will have been executed; everything\n"
         "after it will have been rewound via `Edit_at`.\n\n"
-        "If `new_content` is provided, the buffer is replaced first (rewinding\n"
-        "the minimum necessary to stay consistent), then the step is applied.\n\n"
+        "If `reload_from_file` is true, the server re-reads the `file_path`\n"
+        "originally supplied to `rocq_start` and replaces the buffer first\n"
+        "(rewinding the minimum necessary to stay consistent), then applies\n"
+        "the step. Fails when the session was opened with inline `content`\n"
+        "instead of a `file_path`, or when the file no longer exists.\n\n"
         "If `admit` is true, opaque proofs encountered while advancing are\n"
         "replaced with `Admitted.` — useful for jumping past uninteresting\n"
         "proofs."
@@ -163,13 +166,13 @@ def rocq_step_to(
     session_id: str,
     line: int,
     col: Optional[int] = None,
-    new_content: Optional[str] = None,
+    reload_from_file: bool = False,
     admit: bool = False,
 ) -> Dict[str, Any]:
     try:
         session = _registry.get(session_id)
-        if new_content is not None:
-            session.set_buffer(new_content)
+        if reload_from_file:
+            session.reload_buffer_from_file()
         result = session.step_to(line, col, admit=admit)
         return {
             "ok": True,

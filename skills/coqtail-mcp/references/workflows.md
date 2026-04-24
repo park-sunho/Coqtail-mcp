@@ -77,9 +77,8 @@ rocq_start(session_id="iter", file_path="/abs/f.v", coq_path="/.../_opam/bin")
 rocq_step_to(session_id="iter", line=L - 1)
 rocq_goals(session_id="iter")     # read goal, decide next tactic
 
-# Edit file on disk to use the new tactic, then:
-new = Path("/abs/f.v").read_text()
-rocq_step_to(session_id="iter", line=L, new_content=new)
+# Edit /abs/f.v on disk to use the new tactic, then:
+r = rocq_step_to(session_id="iter", line=L, reload_from_file=True)
 
 if r["success"]:
     rocq_goals(session_id="iter")   # inspect goal after new tactic
@@ -88,10 +87,12 @@ else:
     ...
 ```
 
-**Why `new_content`?** The session's internal buffer is independent of
-the file on disk. When you edit the file, the session doesn't notice
-until you pass the updated source back in. The server diffs old vs new
-and rewinds only what's affected.
+**Why `reload_from_file`?** The session's internal buffer is independent
+of the file on disk. When you edit the file, the session doesn't notice
+until you ask it to re-read — `reload_from_file=True` tells the server
+to pull fresh contents from the original `file_path`, diff against the
+old buffer, and rewind only what's affected. It requires the session to
+have been opened with `file_path` (not inline `content`).
 
 ---
 
@@ -119,17 +120,20 @@ for i, cand in enumerate(candidates):
 ```
 rocq_start(session_id="probe", file_path="/abs/f.v", coq_path="...")
 for cand in candidates:
-    rocq_step_to(session_id="probe", line=L - 1,
-                 new_content=buffer_with(cand))
+    # Write buffer_with(cand) back to /abs/f.v (Edit/Write), then:
+    rocq_step_to(session_id="probe", line=L - 1, reload_from_file=True)
     r = rocq_step_to(session_id="probe", line=L)
     if r["success"]:
         winners.append((cand, r))
-    # Next iteration's new_content diff will rewind automatically.
+    # Next iteration's reload_from_file diff will rewind automatically.
 rocq_close(session_id="probe")
 ```
 
 Prefer (b) for a dozen candidates; switch to (a) if the proof prelude is
-very large (so re-running it per candidate would dominate).
+very large (so re-running it per candidate would dominate). For (b) the
+file on disk must be the current candidate before each reload — the
+server re-reads from the path supplied to `rocq_start`, so stage the
+edit first.
 
 ---
 

@@ -196,3 +196,88 @@ def test_live_rewind_roundtrip(session: RocqSession) -> None:
     assert r2.success
     assert r2.sentences_rewound == sent
     assert session.endpoints == []
+
+
+def test_offline_reload_from_file_requires_source_path() -> None:
+    """An inline-content session has no file to reload from."""
+    reg = SessionRegistry()
+    s = reg.create(session_id="inline", content="Theorem t : 1 = 1.")
+    assert s.source_path is None
+    with pytest.raises(SessionError, match="inline content"):
+        s.reload_buffer_from_file()
+
+
+def test_offline_reload_from_file_detects_missing_file(tmp_path) -> None:
+    """A session whose recorded file has since vanished reports a clean error."""
+    reg = SessionRegistry()
+    missing = tmp_path / "gone.v"
+    s = reg.create(session_id="filed", filename=str(missing), content="")
+    assert s.source_path == str(missing)
+    with pytest.raises(SessionError, match="no longer exists"):
+        s.reload_buffer_from_file()
+
+
+def test_offline_reload_from_file_refreshes_buffer(tmp_path) -> None:
+    """Rewriting the on-disk file and calling reload updates the session buffer."""
+    reg = SessionRegistry()
+    src = tmp_path / "f.v"
+    src.write_text("Theorem a : 1 = 1.\n", encoding="utf-8")
+    s = reg.create(session_id="filed", filename=str(src), content=src.read_text())
+    assert s.buffer_text().startswith("Theorem a")
+
+    src.write_text("Theorem b : 2 = 2.\n", encoding="utf-8")
+    s.reload_buffer_from_file()
+    assert s.buffer_text().startswith("Theorem b")
+
+
+@needs_rocq
+def test_live_reload_from_file_via_server(tmp_path) -> None:
+    """End-to-end: editing the file on disk and calling rocq_step_to with
+    reload_from_file=True picks up the new contents (and reports the failure
+    the new version introduces)."""
+    from coqtail_mcp import server as srv
+
+    src = tmp_path / "reload.v"
+    src.write_text(
+        "Theorem t : forall n : nat, n + 0 = n.\n"
+        "Proof.\n"
+        "  intros n.\n"
+        "  induction n as [| n' IH].\n"
+        "  - reflexivity.\n"
+        "  - simpl. rewrite IH. reflexivity.\n"
+        "Qed.\n",
+        encoding="utf-8",
+    )
+    r = srv.rocq_start(session_id="reload_live", file_path=str(src),
+                       coq_path=COQ_PATH, coq_prog=COQ_PROG)
+    try:
+        assert r["ok"], r
+        r = srv.rocq_step_to(session_id="reload_live", line=7)
+        assert r["ok"] and r["success"], r
+
+        # Break line 6 on disk, rewind, reload, and confirm the failure.
+        src.write_text(
+            src.read_text().replace("rewrite IH.", "rewrite wrong_ih."),
+            encoding="utf-8",
+        )
+        r = srv.rocq_step_to(session_id="reload_live", line=1)
+        assert r["ok"] and r["success"]
+
+        r = srv.rocq_step_to(session_id="reload_live", line=7,
+                             reload_from_file=True)
+        assert r["ok"]
+        assert r["success"] is False
+        assert "wrong_ih" in (r["error"] or "")
+
+        # Inline-content session: reload_from_file must produce ok=false.
+        srv.rocq_start(session_id="reload_inline", content="Theorem t : 1 = 1.",
+                       coq_path=COQ_PATH, coq_prog=COQ_PROG)
+        try:
+            r = srv.rocq_step_to(session_id="reload_inline", line=1,
+                                 reload_from_file=True)
+            assert r["ok"] is False
+            assert "inline content" in r["error"]
+        finally:
+            srv.rocq_close(session_id="reload_inline")
+    finally:
+        srv.rocq_close(session_id="reload_live")

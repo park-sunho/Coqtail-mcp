@@ -81,13 +81,13 @@ admitted proofs triggered by `admit=true`).
 
 **Arguments**
 
-| Name          | Type   | Required | Notes |
-|---------------|--------|----------|-------|
-| `session_id`  | string | yes      | |
-| `line`        | int    | yes      | 1-indexed. Must be within the buffer. |
-| `col`         | int    | no       | 1-indexed. Defaults to end-of-line (inclusive of any terminator on that line). |
-| `new_content` | string | no       | Replace the session's buffer before stepping. Only the sentences affected by the diff are rewound. |
-| `admit`       | bool   | no       | Default `false`. When `true`, opaque proofs (`Qed.`/`Admitted.`) encountered during the advance are replaced with `Admitted.`. |
+| Name               | Type   | Required | Notes |
+|--------------------|--------|----------|-------|
+| `session_id`       | string | yes      | |
+| `line`             | int    | yes      | 1-indexed. Must be within the buffer. |
+| `col`              | int    | no       | 1-indexed. Defaults to end-of-line (inclusive of any terminator on that line). |
+| `reload_from_file` | bool   | no       | Default `false`. When `true`, the server re-reads the `file_path` supplied to `rocq_start` and replaces the buffer before stepping. Only the sentences affected by the diff are rewound. Fails when the session was opened with inline `content` or when the file no longer exists. |
+| `admit`            | bool   | no       | Default `false`. When `true`, opaque proofs (`Qed.`/`Admitted.`) encountered during the advance are replaced with `Admitted.`. |
 
 **Returns**
 
