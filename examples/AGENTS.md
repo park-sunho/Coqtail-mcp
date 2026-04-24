@@ -1,5 +1,3 @@
-<!-- Copy this to AGENTS.md and CLAUDE.md -->
-
 When working on Rocq/Coq proofs, use the `coqtail-mcp` workflow as the default proof-development loop.
 
 First, read the `coqtail-mcp` skill/instructions before doing proof work. If your environment has a skill system, load/read the `coqtail-mcp` skill. Otherwise, read the local `SKILL.md` for `coqtail-mcp` if available, for example:
