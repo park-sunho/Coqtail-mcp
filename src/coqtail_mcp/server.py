@@ -90,8 +90,11 @@ def _resolve_content(
         "`coq_prog` blank so the server auto-selects `coqidetop` on Rocq\n"
         "≥ 8.9 (plain `coqtop` no longer speaks the IDE protocol on those\n"
         "versions and will hang).\n\n"
-        "`extra_args` is passed through to the Rocq process (e.g. `-R`, `-Q`,\n"
-        "`-I` flags from a _CoqProject file). `init_timeout` caps the initial\n"
+        "Project settings are auto-detected for `file_path` sessions. By\n"
+        "default, `build_system='prefer-dune'` uses Dune when a `dune-project`\n"
+        "is found, otherwise it searches upward for `_CoqProject` and\n"
+        "`_RocqProject`. `extra_args` are appended last and passed through to\n"
+        "the Rocq process. `init_timeout` caps the initial\n"
         "handshake in seconds (default 60); pass 0 or a large number to\n"
         "disable it."
     )
@@ -103,6 +106,9 @@ def rocq_start(
     coq_path: Optional[str] = None,
     coq_prog: Optional[str] = None,
     extra_args: Optional[List[str]] = None,
+    build_system: str = "prefer-dune",
+    project_names: Optional[List[str]] = None,
+    dune_compile_deps: bool = False,
     strict_stderr: bool = False,
     init_timeout: Optional[int] = 60,
 ) -> Dict[str, Any]:
@@ -115,6 +121,9 @@ def rocq_start(
             coq_path=coq_path,
             coq_prog=coq_prog,
             extra_args=extra_args,
+            build_system=build_system,
+            project_names=project_names,
+            dune_compile_deps=dune_compile_deps,
             stderr_is_warning=not strict_stderr,
             init_timeout=init_timeout,
         )

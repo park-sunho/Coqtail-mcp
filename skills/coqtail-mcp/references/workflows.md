@@ -197,31 +197,26 @@ for evaluation.
 
 ---
 
-## 8. Handle `_CoqProject` flags
+## 8. Handle project settings
 
-There is no automatic `_CoqProject` parsing. Read the file yourself,
-parse the `-Q`/`-R`/`-I`/`-arg` lines, and pass them as `extra_args`:
+For `file_path` sessions, `rocq_start` automatically searches upward for
+project settings. The default `build_system="prefer-dune"` uses Dune when a
+`dune-project` file is present; otherwise it reads `_CoqProject` and
+`_RocqProject` files and passes their `-Q`/`-R`/`-I`/`-include`/`-arg`
+options to Rocq.
 
 ```
-def parse_coqproject(path):
-    args = []
-    for raw in Path(path).read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or not line.startswith("-"):
-            continue
-        args.extend(shlex.split(line))
-    return args
-
-flags = parse_coqproject("/abs/proj/_CoqProject")
 rocq_start(session_id="proj", file_path="/abs/proj/src/foo.v",
-           coq_path="/.../_opam/bin", extra_args=flags)
+           coq_path="/.../_opam/bin")
 ```
 
-Pitfalls to watch for:
-- Physical paths in `_CoqProject` are relative to the file itself.
-  Convert them to absolute paths (`shlex.split` won't do this for you).
-- `-arg X` in a `_CoqProject` prefixes `X` to the `coqidetop` args;
-  treat it as if the leading `-arg` were stripped.
+Use these knobs when the default is not what you want:
+- `build_system="prefer-coqproject"` uses project files if any are found,
+  otherwise falls back to Dune.
+- `build_system="dune"` or `"coqproject"` forces one mode.
+- `project_names=["_CoqProject", "_CoqProject.local"]` customizes project
+  files.
+- `extra_args=[...]` appends final overrides after detected args.
 
 ---
 

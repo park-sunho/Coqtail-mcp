@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from . import _COQTAIL_LIB_DIR  # noqa: F401  ensure sys.path shim is applied
+from .project import ProjectConfig, resolve_project_config
 
 import coqtop as CT  # type: ignore  # vendored
 import coqtail as CTAIL  # type: ignore  # vendored (for sentence helpers)
@@ -71,6 +72,9 @@ class RocqSession:
         coq_path: Optional[str] = None,
         coq_prog: Optional[str] = None,
         extra_args: Optional[List[str]] = None,
+        build_system: str = "prefer-dune",
+        project_names: Optional[List[str]] = None,
+        dune_compile_deps: bool = False,
         stderr_is_warning: bool = True,
         init_timeout: Optional[int] = 60,
     ) -> None:
@@ -86,6 +90,12 @@ class RocqSession:
         self._coq_path = coq_path
         self._coq_prog = coq_prog
         self._extra_args = list(extra_args or [])
+        self._build_system = build_system
+        self._project_names = (
+            list(project_names) if project_names is not None else None
+        )
+        self._dune_compile_deps = dune_compile_deps
+        self._project_config: Optional[ProjectConfig] = None
         # Rocq itself often writes harmless banners (e.g. "Welcome to Rocq") to
         # stderr; Coqtail treats unrecognized stderr output as fatal unless
         # this flag is on. For agent use, a warning is the right severity.
@@ -121,12 +131,18 @@ class RocqSession:
                 "str_version": ver_or_err["str_version"],
                 "latest": ver_or_err["latest"],
             }
+            self._project_config = resolve_project_config(
+                self.source_path,
+                extra_args=self._extra_args,
+                build_system=self._build_system,
+                project_names=self._project_names,
+            )
 
             err, stderr = self._coqtop.start(
                 self.filename,
-                self._extra_args,
-                use_dune=False,
-                dune_compile_deps=False,
+                self._project_config.launch_args,
+                use_dune=self._project_config.use_dune,
+                dune_compile_deps=self._dune_compile_deps,
                 timeout=self._init_timeout,
                 stderr_is_warning=self._stderr_is_warning,
             )
@@ -142,6 +158,7 @@ class RocqSession:
                 "filename": self.filename,
                 "version": self.version_info,
                 "startup_stderr": stderr,
+                "project": self._project_status(),
             }
 
     def close(self) -> None:
@@ -399,9 +416,40 @@ class RocqSession:
             "coq_path": self._coq_path,
             "coq_prog": self._coq_prog,
             "extra_args": list(self._extra_args),
+            "project": self._project_status(),
         }
 
     # ---------------------------------------------------------------- internals
+    def _project_status(self) -> Dict[str, Any]:
+        config = self._project_config
+        if config is None:
+            return {
+                "build_system": self._build_system,
+                "project_names": list(self._project_names)
+                if self._project_names is not None
+                else None,
+                "project_files": [],
+                "coqproject_args": [],
+                "launch_args": list(self._extra_args),
+                "in_dune_project": False,
+                "use_dune": False,
+                "dune_project_file": None,
+                "dune_compile_deps": self._dune_compile_deps,
+            }
+        return {
+            "build_system": config.build_system,
+            "project_names": list(self._project_names)
+            if self._project_names is not None
+            else None,
+            "project_files": list(config.project_files),
+            "coqproject_args": list(config.coqproject_args),
+            "launch_args": list(config.launch_args),
+            "in_dune_project": config.in_dune_project,
+            "use_dune": config.use_dune,
+            "dune_project_file": config.dune_project_file,
+            "dune_compile_deps": self._dune_compile_deps,
+        }
+
     def _public_endpoint(self) -> Optional[Tuple[int, int]]:
         """Return the 1-indexed end-of-last-sentence, or ``None`` if nothing sent."""
         if not self.endpoints:

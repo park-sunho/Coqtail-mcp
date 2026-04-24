@@ -216,14 +216,15 @@ against it.
    push changes. `reload_from_file` only works when the session was
    started with `file_path`; inline-content sessions must be reopened.
 
-6. **`_CoqProject` flags are not auto-detected.** Pass logical-path
-   flags via `extra_args` when starting:
+6. **Project settings are auto-detected for `file_path` sessions.**
+   The default `build_system="prefer-dune"` uses Dune when a
+   `dune-project` file is found, otherwise it searches upward for
+   `_CoqProject` and `_RocqProject` files:
    ```
-   rocq_start(..., extra_args=["-Q", "/abs/theory/", "MyLib",
-                               "-w", "-notation-overridden"])
+   rocq_start(..., file_path="/abs/proj/src/foo.v")
    ```
-   Flags that appear in a `_CoqProject` file should be parsed by the
-   agent and forwarded verbatim.
+   Use `build_system="prefer-coqproject"`, `"dune"`, or `"coqproject"`
+   to control precedence. Pass `extra_args` for final overrides.
 
 7. **Output is plain text.** Richpp tags (syntax highlighting spans)
    are stripped. If the user specifically wants highlighting, that

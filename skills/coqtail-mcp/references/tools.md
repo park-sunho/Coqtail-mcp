@@ -22,7 +22,10 @@ Spawn a `coqidetop` subprocess and create a new session.
 | `content`      | string   | one of   | Inline `.v` source as a string. Mutually exclusive with `file_path`. |
 | `coq_path`     | string   | no       | Directory containing the Rocq binaries (e.g. `/home/u/.opam/my-switch/bin`). If omitted, uses `$PATH`. |
 | `coq_prog`     | string   | no       | Name of the binary to launch. Leave blank for auto-detection — **setting this wrong causes a hang on Rocq ≥ 8.9**. |
-| `extra_args`   | string[] | no       | Passed through to `coqidetop`; typically `-Q`, `-R`, `-I`, `-w`, etc. |
+| `extra_args`   | string[] | no       | Appended last to the detected project args and passed through to `coqidetop`; typically `-Q`, `-R`, `-I`, `-w`, etc. |
+| `build_system` | string   | no       | Default `prefer-dune`. One of `prefer-dune`, `prefer-coqproject`, `dune`, `coqproject`. Controls Dune vs `_CoqProject` precedence for `file_path` sessions. |
+| `project_names`| string[] | no       | Project filenames to search upward. Defaults to `_CoqProject` and `_RocqProject`. |
+| `dune_compile_deps` | bool | no       | Default `false`. When using Dune, asks Dune to compile dependencies before launching the toplevel. |
 | `strict_stderr`| bool     | no       | Default `false`. When `true`, any unrecognized output on stderr (including Rocq's welcome banner) becomes a fatal error. |
 | `init_timeout` | int      | no       | Seconds to wait for the initial handshake (default 60). Pass 0 or a very large number to disable. |
 
@@ -34,7 +37,17 @@ Spawn a `coqidetop` subprocess and create a new session.
   "session_id": "t1",
   "filename": "/abs/path/to/proof.v",
   "version": { "version": [9,1,1], "str_version": "9.1.1", "latest": null },
-  "startup_stderr": ""
+  "startup_stderr": "",
+  "project": {
+    "build_system": "prefer-dune",
+    "project_files": ["/abs/path/_CoqProject"],
+    "coqproject_args": ["-Q", "/abs/path/theory", "MyLib"],
+    "launch_args": ["-Q", "/abs/path/theory", "MyLib"],
+    "in_dune_project": false,
+    "use_dune": false,
+    "dune_project_file": null,
+    "dune_compile_deps": false
+  }
 }
 ```
 
@@ -237,7 +250,13 @@ Inspect metadata about a session without modifying it.
   "buffer_lines": 42,
   "coq_path": "/home/u/.opam/my-switch/bin",
   "coq_prog": null,
-  "extra_args": ["-Q", "/abs/theory/", "MyLib"]
+  "extra_args": ["-w", "all"],
+  "project": {
+    "build_system": "prefer-dune",
+    "project_files": ["/abs/path/_CoqProject"],
+    "launch_args": ["-Q", "/abs/path/theory", "MyLib", "-w", "all"],
+    "use_dune": false
+  }
 }
 ```
 

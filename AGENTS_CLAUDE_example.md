@@ -10,11 +10,11 @@ For Rocq proof development, do not use whole-file compilation as the way to find
 
 Instead, use `coqtail-mcp` interactively:
 - Start a live session with `rocq_start`.
-- Parse and pass relevant `_CoqProject` flags when needed.
+- Let `rocq_start(file_path=...)` auto-detect Dune or `_CoqProject` settings; use `build_system`, `project_names`, or `extra_args` only when overriding that default.
 - Move through the proof with `rocq_step_to`.
 - Inspect goals with `rocq_goals`.
 - Use `rocq_query` for `Check`, `Search`, `Print`, `About`, etc.
-- After editing a file that is already loaded in the session, prefer pushing the edited buffer via `rocq_step_to(..., new_content=...)` so the live session reflects the current proof text.
+- After editing a file that is already loaded in the session, use `rocq_step_to(..., reload_from_file=true)` or reopen the session so the live buffer reflects the current proof text.
 - Use the live goal/error returned by Coqtail to guide each proof step.
 
 Compilation is allowed only in these cases:

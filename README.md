@@ -139,6 +139,13 @@ rocq_query(session_id="demo", query="Check nat")
 rocq_close(session_id="demo")
 ```
 
+For `file_path` sessions, `rocq_start` automatically searches upward for
+project settings. The default `build_system="prefer-dune"` uses Dune when a
+`dune-project` file is present, otherwise it reads `_CoqProject` and
+`_RocqProject` flags. Use `build_system="prefer-coqproject"`, `"dune"`, or
+`"coqproject"` to force the selection, and pass `extra_args` for final
+overrides.
+
 ## Project layout
 
 ```
@@ -148,12 +155,14 @@ Coqtail-mcp/
 │   ├── __main__.py          # `python -m coqtail_mcp`
 │   ├── server.py            # FastMCP server + tool definitions
 │   ├── session.py           # RocqSession + SessionRegistry
+│   ├── project.py           # _CoqProject / Dune discovery
 │   ├── formatting.py        # Goals → plain text / structured summary
 │   └── coqtail_lib/         # vendored Coqtail modules (unmodified)
 │       ├── xmlInterface.py
 │       ├── coqtop.py
 │       └── coqtail.py
 ├── tests/
+│   ├── test_project.py      # project discovery/parser tests
 │   └── test_session.py      # offline + live smoke tests
 ├── examples/
 │   ├── demo.v               # sample Coq file used by tests
