@@ -155,9 +155,10 @@ current endpoint.
 
 **Arguments**
 
-| Name         | Type   | Required |
-|--------------|--------|----------|
-| `session_id` | string | yes      |
+| Name         | Type           | Required | Notes |
+|--------------|----------------|----------|-------|
+| `session_id` | string         | yes      | |
+| `range`      | array of 2 ints | no      | Inclusive rendered-text line range. Positive values are 1-indexed; negative values count from the bottom, so `[-5, -1]` returns the last five lines. Zero is invalid. |
 
 **Returns**
 
@@ -185,6 +186,11 @@ current endpoint.
 
 - `text` is a rendered view close to what `coqtop` prints; preserve line
   breaks if you show it to the user.
+- `range=[start, end]` slices only the rendered `text`. When supplied,
+  `text_range` reports the requested, resolved, and selected line numbers.
+  With `range` set, `summary.fg` omits full hypotheses/conclusions and
+  instead returns compact per-goal counts to avoid spending context on the
+  data you intentionally did not request.
 - `message` is the `Subgoals` RPC's side-message channel — normally
   empty, but Rocq sometimes attaches diagnostics (e.g. when proof diffs
   are on). Mirrored into `info`.

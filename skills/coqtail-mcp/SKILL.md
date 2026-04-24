@@ -25,7 +25,7 @@ check `ok` before reading other fields.
 | `rocq_start` | Spawn a Rocq session. Pass either `file_path` OR `content`. |
 | `rocq_close` | Terminate and forget a session. |
 | `rocq_step_to` | Advance OR rewind so the state matches `(line, col)`. |
-| `rocq_goals` | Current focused goal + hypotheses, as text and structured summary. |
+| `rocq_goals` | Current focused goal + hypotheses, as text and structured summary. Optional `range=[start, end]` slices rendered text lines. |
 | `rocq_query` | Non-state-changing query (`Check`, `Print`, `Search`, …). |
 | `rocq_status` | Inspect one session (version, sentences sent, current endpoint). |
 | `rocq_list` | List open session ids. |
@@ -75,6 +75,11 @@ rocq_goals(session_id="t1")
       summary: { in_proof: true, fg: [{hypotheses: ["n : nat"],
                                        conclusion: "n + 0 = n"}], ... } }
 
+rocq_goals(session_id="t1", range=[-5, -1])
+  → returns only the final five rendered goal lines. Positive line numbers are
+    1-indexed; negative numbers count from the bottom. With `range` set, the
+    summary omits full hypotheses/conclusions and keeps compact counts.
+
 rocq_close(session_id="t1")
 ```
 
@@ -105,6 +110,10 @@ when the source changes.
 
 `rocq_query` does not advance the session. Use it for `Check`, `Print`,
 `Search`, `Locate`, `About`, `Compute`, etc.
+
+When you need to find a specific hypothesis or fact in a large context,
+prefer a targeted `rocq_query` (`Search`, `Check`, `About`, etc.) before
+asking `rocq_goals` for the full context.
 
 ```
 rocq_query(session_id="t1", query="Search (_ + 0 = _).")
