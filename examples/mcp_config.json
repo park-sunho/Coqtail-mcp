@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "coqtail": {
+      "command": "coqtail-mcp"
+    },
+    "coqtail_explicit_python": {
+      "command": "python",
+      "args": ["-m", "coqtail_mcp"],
+      "env": {
+        "PYTHONPATH": "/absolute/path/to/Coqtail-mcp/src"
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coqtail-mcp"
+version = "0.1.0"
+description = "An MCP server that exposes Rocq/Coq proof-assistant sessions to AI agents (Claude Code, Codex, etc.). Built on top of Coqtail's XML-protocol client."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Sunho Park" }]
+dependencies = [
+    "mcp>=1.2",
+]
+
+[project.scripts]
+coqtail-mcp = "coqtail_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/coqtail_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/coqtail_mcp/coqtail_lib" = "coqtail_mcp/coqtail_lib"
