@@ -109,6 +109,24 @@ def apply_item_range(
     return list(items[clipped_start - 1 : clipped_end])
 
 
+def truncate_strings(value: Any, max_chars: Optional[int]) -> Any:
+    """Recursively cap every string value to ``max_chars`` characters."""
+    if max_chars is None:
+        return value
+    if isinstance(value, str):
+        return value[:max_chars]
+    if isinstance(value, list):
+        return [truncate_strings(item, max_chars) for item in value]
+    if isinstance(value, tuple):
+        return tuple(truncate_strings(item, max_chars) for item in value)
+    if isinstance(value, dict):
+        return {
+            key: truncate_strings(item, max_chars)
+            for key, item in value.items()
+        }
+    return value
+
+
 def format_goals(goals: Optional[Goals]) -> str:
     """Render a Coqtail :class:`Goals` object as a single plain-text block."""
     if goals is None:

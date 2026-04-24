@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from .formatting import summarize_goals
+from .formatting import summarize_goals, truncate_strings
 from .session import SessionError, SessionRegistry
 
 _registry = SessionRegistry()
@@ -46,6 +46,15 @@ def _omit_empty_fields(data: Dict[str, Any]) -> Dict[str, Any]:
         for key, value in data.items()
         if key not in empty_optional_fields or (value is not None and value != "")
     }
+
+
+def _validate_max_chars(max_chars: Optional[int]) -> None:
+    if max_chars is None:
+        return
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool):
+        raise SessionError("max_chars must be a positive integer")
+    if max_chars < 1:
+        raise SessionError("max_chars must be a positive integer")
 
 
 def _resolve_content(
@@ -202,18 +211,29 @@ def rocq_step_to(
         "hypothesis entries for each focused goal. Positive indexes are\n"
         "1-indexed; negative indexes count from the bottom, so `[-5, -1]`\n"
         "returns the last five hypotheses.\n\n"
+        "Pass `max_chars=N` to cap every string field in the response to at\n"
+        "most N characters, applied separately to each hypothesis,\n"
+        "conclusion, name, and stderr string.\n\n"
         "If no proof is in progress, `summary.in_proof` is false."
     )
 )
-def rocq_goals(session_id: str, range: Optional[List[int]] = None) -> Dict[str, Any]:
+def rocq_goals(
+    session_id: str,
+    range: Optional[List[int]] = None,
+    max_chars: Optional[int] = None,
+) -> Dict[str, Any]:
     try:
+        _validate_max_chars(max_chars)
         session = _registry.get(session_id)
         goals, _message, stderr = session.goals_text()
         return _omit_empty_fields(
             {
                 "ok": True,
-                "summary": summarize_goals(goals, hypothesis_range=range),
-                "stderr": stderr,
+                "summary": truncate_strings(
+                    summarize_goals(goals, hypothesis_range=range),
+                    max_chars,
+                ),
+                "stderr": truncate_strings(stderr, max_chars),
             }
         )
     except Exception:  # noqa: BLE001
@@ -225,19 +245,26 @@ def rocq_goals(session_id: str, range: Optional[List[int]] = None) -> Dict[str, 
         "Run a non-state-changing query (`Check`, `Print`, `Search`, `About`,\n"
         "`Locate`, `Compute`, …). The trailing `.` is optional — it's added\n"
         "if missing.\n\n"
-        "Does NOT advance the session. Returns the text Rocq would print."
+        "Does NOT advance the session. Returns the text Rocq would print.\n\n"
+        "Pass `max_chars=N` to cap every string field in the response to at\n"
+        "most N characters, applied separately to `message` and `stderr`."
     )
 )
-def rocq_query(session_id: str, query: str) -> Dict[str, Any]:
+def rocq_query(
+    session_id: str,
+    query: str,
+    max_chars: Optional[int] = None,
+) -> Dict[str, Any]:
     try:
+        _validate_max_chars(max_chars)
         session = _registry.get(session_id)
         res = session.query(query)
         return _omit_empty_fields(
             {
                 "ok": True,
                 "success": res.success,
-                "message": res.message,
-                "stderr": res.stderr,
+                "message": truncate_strings(res.message, max_chars),
+                "stderr": truncate_strings(res.stderr, max_chars),
             }
         )
     except Exception:  # noqa: BLE001

@@ -23,7 +23,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from coqtail_mcp.session import RocqSession, SessionRegistry, SessionError, _make_buffer  # noqa: E402
-from coqtail_mcp.formatting import apply_line_range, format_goals, summarize_goals  # noqa: E402
+from coqtail_mcp.formatting import (  # noqa: E402
+    apply_line_range,
+    format_goals,
+    summarize_goals,
+    truncate_strings,
+)
 from xmlInterface import Goal, Goals  # noqa: E402
 
 
@@ -128,6 +133,22 @@ def test_offline_summarize_goals_can_slice_hypotheses() -> None:
     ]
 
 
+def test_offline_truncate_strings_caps_each_string_entry() -> None:
+    value = {
+        "hypotheses": ["abcdef", "xyz"],
+        "conclusion": "long conclusion",
+        "nested": [{"name": "goal_name"}],
+        "count": 3,
+    }
+
+    assert truncate_strings(value, 4) == {
+        "hypotheses": ["abcd", "xyz"],
+        "conclusion": "long",
+        "nested": [{"name": "goal"}],
+        "count": 3,
+    }
+
+
 def test_offline_server_ok_false_is_minimal(tmp_path) -> None:
     from coqtail_mcp import server as srv
 
@@ -139,6 +160,12 @@ def test_offline_server_ok_false_is_minimal(tmp_path) -> None:
     assert srv.rocq_goals(session_id="missing") == {"ok": False}
     assert srv.rocq_query(session_id="missing", query="Check nat") == {"ok": False}
     assert srv.rocq_status(session_id="missing") == {"ok": False}
+    assert srv.rocq_goals(session_id="missing", max_chars=0) == {"ok": False}
+    assert srv.rocq_query(
+        session_id="missing",
+        query="Check nat",
+        max_chars=-1,
+    ) == {"ok": False}
 
 
 # -------------------------------------------------------------------- live
@@ -270,6 +297,24 @@ def test_live_server_outputs_are_minimal() -> None:
         hypotheses = goal["hypotheses"]
         assert len(hypotheses) == 1
         assert "HC" in hypotheses[0]
+
+        r = srv.rocq_goals(
+            session_id="minimal_outputs",
+            range=[-2, -1],
+            max_chars=3,
+        )
+        goal = r["summary"]["fg"][0]
+        assert all(len(hyp) <= 3 for hyp in goal["hypotheses"])
+        assert len(goal["conclusion"]) <= 3
+        assert goal["hypothesis_count"] == 4
+
+        r = srv.rocq_query(
+            session_id="minimal_outputs",
+            query="Check nat",
+            max_chars=5,
+        )
+        assert r["success"]
+        assert len(r["message"]) <= 5
 
         r = srv.rocq_status(session_id="minimal_outputs")
         assert r == {"ok": True, "started": True}

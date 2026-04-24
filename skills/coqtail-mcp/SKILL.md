@@ -79,6 +79,9 @@ rocq_goals(session_id="t1", range=[-5, -1])
     values are 1-indexed; negative values count from the bottom. Each focused
     goal also includes `hypothesis_count`.
 
+rocq_goals(session_id="t1", range=[-5, -1], max_chars=500)
+  → every string in the goal response is capped at 500 characters.
+
 rocq_close(session_id="t1")
 ```
 
@@ -86,7 +89,8 @@ rocq_close(session_id="t1")
 strings if you need to reason about them programmatically.
 If the full context might be large, first consider calling
 `rocq_goals(..., range=[-20, -1])` or another narrow hypothesis range to save
-context. Expand to the full context only when the omitted hypotheses matter.
+context. Add `max_chars` when individual hypotheses or conclusions may be
+large. Expand to the full context only when the omitted hypotheses matter.
 
 ### Stream through a proof one tactic at a time
 
@@ -115,6 +119,8 @@ when the source changes.
 When you need to find a specific hypothesis or fact in a large context,
 prefer a targeted `rocq_query` (`Search`, `Check`, `About`, etc.) before
 asking `rocq_goals` for the full context.
+Use `max_chars` on broad queries such as `Search` to guarantee the `message`
+string stays within a fixed character budget.
 
 ```
 rocq_query(session_id="t1", query="Search (_ + 0 = _).")
@@ -146,6 +152,8 @@ Optional fields are omitted when empty or absent. For example, successful
 steps omit `error`, `error_range`, and empty `stderr`; `rocq_start` omits empty
 `startup_stderr`; unnamed goals omit `name`.
 If `ok` is `false`, no other fields are returned.
+For `rocq_goals` and `rocq_query`, `max_chars` is a positive integer that caps
+each emitted string value independently with hard truncation and no ellipsis.
 
 Per-sentence info-panel messages are kept internally by the session layer but
 are not exposed through the MCP tool response.

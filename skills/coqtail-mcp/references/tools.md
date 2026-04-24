@@ -144,6 +144,7 @@ current endpoint.
 |--------------|----------------|----------|-------|
 | `session_id` | string         | yes      | |
 | `range`      | array of 2 ints | no      | Inclusive hypothesis-entry range for each focused goal. Positive values are 1-indexed; negative values count from the bottom, so `[-5, -1]` returns the last five hypotheses. Zero is invalid. |
+| `max_chars`  | int            | no       | Positive integer. Caps every emitted string value independently to at most this many characters. Uses hard truncation with no ellipsis. |
 
 **Returns**
 
@@ -167,6 +168,8 @@ current endpoint.
   and goal counts are still returned. When `range` is used, each focused goal
   also includes `hypothesis_count`, so agents can tell whether more hypotheses
   existed than were returned.
+- `max_chars=N` applies to each string value separately, including each
+  hypothesis entry, `conclusion`, goal `name`, and `stderr`.
 - `name` is included only for named goals.
 - `stderr` is included only when non-empty.
 - `summary.fg` lists the **focused** goals — those the user's next tactic
@@ -187,6 +190,7 @@ Run a query that does not change the proof state.
 |--------------|--------|----------|-------|
 | `session_id` | string | yes      | |
 | `query`      | string | yes      | A `Check …`, `Print …`, `Search …`, `About …`, `Locate …`, `Compute …`, etc. The trailing `.` is added if missing. |
+| `max_chars`  | int    | no       | Positive integer. Caps every emitted string value independently to at most this many characters. Uses hard truncation with no ellipsis. |
 
 **Returns**
 
@@ -201,6 +205,7 @@ Run a query that does not change the proof state.
 When Rocq rejects the query (e.g. unknown identifier), `success` is
 `false` and `message` contains Rocq's error text. `stderr` is included only
 when non-empty.
+`max_chars=N` applies separately to `message` and `stderr`.
 
 **Important**: `rocq_query` does not consume a state_id — it runs
 relative to the current position without advancing. Repeated queries

@@ -135,8 +135,14 @@ rocq_goals(session_id="demo", range=[-5, -1])
 # → returns only the last five hypotheses in each focused goal, plus
 #   hypothesis_count so agents can tell more hypotheses existed.
 
+rocq_goals(session_id="demo", range=[-5, -1], max_chars=500)
+# → every string value in the goal summary is capped at 500 characters.
+
 rocq_query(session_id="demo", query="Check nat")
 # → { ok: true, success: true, message: "nat : Set" }
+
+rocq_query(session_id="demo", query="Search (_ + 0 = _).", max_chars=1000)
+# → message is capped at 1000 characters.
 
 rocq_close(session_id="demo")
 ```
@@ -145,6 +151,8 @@ Optional response fields such as `startup_stderr`, `stderr`, `error`, and
 `error_range` are omitted when they would be empty or `null`. Goal `name` is
 omitted for unnamed goals.
 If a tool call itself is rejected, the response is only `{ ok: false }`.
+For `rocq_goals` and `rocq_query`, `max_chars` is a positive integer that caps
+each emitted string value independently with hard truncation and no ellipsis.
 
 For `file_path` sessions, `rocq_start` automatically detects project settings.
 The default `build_system="prefer-coqproject"` uses `_CoqProject` or
