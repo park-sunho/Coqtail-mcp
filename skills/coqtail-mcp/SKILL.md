@@ -25,8 +25,8 @@ fields.
 | `rocq_start` | Spawn a Rocq session. Pass either `file_path` OR `content`. |
 | `rocq_close` | Terminate and forget a session. |
 | `rocq_step_to` | Advance OR rewind so the state matches `(line, col)`. |
-| `rocq_goals` | Current focused goal + hypotheses, as a structured summary. Optional `range=[start, end]` slices hypothesis entries. |
-| `rocq_query` | Non-state-changing query (`Check`, `Print`, `Search`, …). |
+| `rocq_goals` | Current focused goal + hypotheses, as a structured summary. Optional `range`, `max_chars`, and `full_output_file` controls for large contexts. |
+| `rocq_query` | Non-state-changing query (`Check`, `Print`, `Search`, …). Optional `max_chars` and `full_output_file` controls for large output. |
 | `rocq_status` | Report whether one session is started. |
 | `rocq_list` | List open session ids. |
 
@@ -82,6 +82,11 @@ rocq_goals(session_id="t1", range=[-5, -1])
 rocq_goals(session_id="t1", range=[-5, -1], max_chars=500)
   → every string in the goal response is capped at 500 characters.
 
+rocq_goals(session_id="t1", range=[-5, -1], max_chars=500,
+           full_output_file="/tmp/t1-goals.json")
+  → response stays capped/ranged, while the file receives the full JSON
+    tool payload before range/max_chars are applied.
+
 rocq_close(session_id="t1")
 ```
 
@@ -90,7 +95,8 @@ strings if you need to reason about them programmatically.
 If the full context might be large, first consider calling
 `rocq_goals(..., range=[-20, -1])` or another narrow hypothesis range to save
 context. Add `max_chars` when individual hypotheses or conclusions may be
-large. Expand to the full context only when the omitted hypotheses matter.
+large. Use `full_output_file` when the complete context may be useful but too
+large for the tool response.
 
 ### Stream through a proof one tactic at a time
 
@@ -120,11 +126,14 @@ When you need to find a specific hypothesis or fact in a large context,
 prefer a targeted `rocq_query` (`Search`, `Check`, `About`, etc.) before
 asking `rocq_goals` for the full context.
 Use `max_chars` on broad queries such as `Search` to guarantee the `message`
-string stays within a fixed character budget.
+string stays within a fixed character budget. Use `full_output_file` to keep
+the in-band response small while writing the complete query result to disk.
 
 ```
 rocq_query(session_id="t1", query="Search (_ + 0 = _).")
 rocq_query(session_id="t1", query="Check plus_n_O")   # trailing dot optional
+rocq_query(session_id="t1", query="Search (_ + 0 = _).", max_chars=1000,
+           full_output_file="/tmp/t1-search.json")
 ```
 
 ### Skip past an opaque proof you don't want to re-check
@@ -144,8 +153,8 @@ The MCP tools intentionally return small envelopes:
 
 - `rocq_start`: `ok`, `session_id`, `startup_stderr`
 - `rocq_step_to`: `ok`, `success`, `endpoint`, `error`, `error_range`, `stderr`
-- `rocq_goals`: `ok`, `summary`, `stderr`
-- `rocq_query`: `ok`, `success`, `message`, `stderr`
+- `rocq_goals`: `ok`, `summary`, `stderr`, `full_output_written_to`
+- `rocq_query`: `ok`, `success`, `message`, `stderr`, `full_output_written_to`
 - `rocq_status`: `ok`, `started`
 
 Optional fields are omitted when empty or absent. For example, successful
@@ -155,6 +164,9 @@ If `ok` is `false`, no other fields are returned.
 For `rocq_goals` and `rocq_query`, `max_chars` is a positive integer that caps
 each emitted string value independently. Truncated strings end with `...`,
 with the suffix included inside the character limit.
+Pass `full_output_file` to write the complete tool payload as UTF-8 JSON
+before `range` or `max_chars` are applied. The response includes
+`full_output_written_to` with the resolved side-file path.
 
 Per-sentence info-panel messages are kept internally by the session layer but
 are not exposed through the MCP tool response.

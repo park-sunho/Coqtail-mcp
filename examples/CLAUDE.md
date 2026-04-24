@@ -14,6 +14,7 @@ Instead, use `coqtail-mcp` interactively:
 - Move through the proof with `rocq_step_to`.
 - Inspect goals with `rocq_goals`.
 - Use `rocq_query` for `Check`, `Search`, `Print`, `About`, etc.
+- For very large goals or query results, pass `full_output_file` so the full JSON payload is written to disk while the tool response stays compact; then read the path returned in `full_output_written_to`.
 - After editing a file that is already loaded in the session, use `rocq_step_to(..., reload_from_file=true)` or reopen the session so the live buffer reflects the current proof text.
 - Use the live goal/error returned by Coqtail to guide each proof step.
 

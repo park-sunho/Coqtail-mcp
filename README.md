@@ -30,8 +30,8 @@ already work. This project only adds:
 | `rocq_start`   | Spawn a `coqidetop` subprocess. Accepts either `file_path` or inline `content`. Returns the session id and startup stderr. |
 | `rocq_close`   | Terminate a session's subprocess and forget it. |
 | `rocq_step_to` | Advance or rewind so the session's state matches `(line, col)`. Optionally re-reads the original `file_path` from disk (`reload_from_file`) and/or admits opaque proofs (`admit`). |
-| `rocq_goals`   | Return the current proof goal and hypothesis context as a structured summary. Accepts an optional `range=[start, end]` to return only selected hypothesis entries. |
-| `rocq_query`   | Run a non-state-changing query (`Check`, `Print`, `Search`, …). |
+| `rocq_goals`   | Return the current proof goal and hypothesis context as a structured summary. Accepts optional `range`, `max_chars`, and `full_output_file` controls for large contexts. |
+| `rocq_query`   | Run a non-state-changing query (`Check`, `Print`, `Search`, …). Accepts optional `max_chars` and `full_output_file` controls for large output. |
 | `rocq_status`  | Report whether one session is started. |
 | `rocq_list`    | List active session ids. |
 
@@ -138,11 +138,21 @@ rocq_goals(session_id="demo", range=[-5, -1])
 rocq_goals(session_id="demo", range=[-5, -1], max_chars=500)
 # → every string value in the goal summary is capped at 500 characters.
 
+rocq_goals(session_id="demo", range=[-5, -1], max_chars=500,
+           full_output_file="/tmp/demo-goals.json")
+# → response stays capped/ranged, while the file receives the full JSON
+#   tool payload before range/max_chars are applied.
+
 rocq_query(session_id="demo", query="Check nat")
 # → { ok: true, success: true, message: "nat : Set" }
 
 rocq_query(session_id="demo", query="Search (_ + 0 = _).", max_chars=1000)
 # → message is capped at 1000 characters.
+
+rocq_query(session_id="demo", query="Search (_ + 0 = _).", max_chars=1000,
+           full_output_file="/tmp/demo-query.json")
+# → response message is capped, while the file receives the full JSON
+#   tool payload before max_chars is applied.
 
 rocq_close(session_id="demo")
 ```
@@ -154,6 +164,10 @@ If a tool call itself is rejected, the response is only `{ ok: false }`.
 For `rocq_goals` and `rocq_query`, `max_chars` is a positive integer that caps
 each emitted string value independently. Truncated strings end with `...`,
 with the suffix included inside the character limit.
+For large goal states or queries, pass `full_output_file` to write the complete
+tool payload as UTF-8 JSON. The file copy is generated before `range` or
+`max_chars` are applied, and the response includes
+`full_output_written_to` with the resolved file path when the write succeeds.
 
 For `file_path` sessions, `rocq_start` automatically detects project settings.
 The default `build_system="prefer-coqproject"` uses `_CoqProject` or

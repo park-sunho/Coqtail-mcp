@@ -145,6 +145,7 @@ current endpoint.
 | `session_id` | string         | yes      | |
 | `range`      | array of 2 ints | no      | Inclusive hypothesis-entry range for each focused goal. Positive values are 1-indexed; negative values count from the bottom, so `[-5, -1]` returns the last five hypotheses. Zero is invalid. |
 | `max_chars`  | int            | no       | Positive integer. Caps every emitted string value independently to at most this many characters. Truncated strings end with `...`, included inside the limit. |
+| `full_output_file` | string   | no       | File path. Writes the complete tool payload as UTF-8 JSON before `range` or `max_chars` are applied. |
 
 **Returns**
 
@@ -170,6 +171,10 @@ current endpoint.
   existed than were returned.
 - `max_chars=N` applies to each string value separately, including each
   hypothesis entry, `conclusion`, goal `name`, and `stderr`.
+- `full_output_file=PATH` writes the complete JSON tool payload to `PATH`
+  before `range` or `max_chars` are applied. The in-band response still honors
+  `range` and `max_chars` and includes `full_output_written_to` with the
+  resolved side-file path.
 - `name` is included only for named goals.
 - `stderr` is included only when non-empty.
 - `summary.fg` lists the **focused** goals — those the user's next tactic
@@ -191,6 +196,7 @@ Run a query that does not change the proof state.
 | `session_id` | string | yes      | |
 | `query`      | string | yes      | A `Check …`, `Print …`, `Search …`, `About …`, `Locate …`, `Compute …`, etc. The trailing `.` is added if missing. |
 | `max_chars`  | int    | no       | Positive integer. Caps every emitted string value independently to at most this many characters. Truncated strings end with `...`, included inside the limit. |
+| `full_output_file` | string | no | File path. Writes the complete tool payload as UTF-8 JSON before `max_chars` is applied. |
 
 **Returns**
 
@@ -206,6 +212,9 @@ When Rocq rejects the query (e.g. unknown identifier), `success` is
 `false` and `message` contains Rocq's error text. `stderr` is included only
 when non-empty.
 `max_chars=N` applies separately to `message` and `stderr`.
+`full_output_file=PATH` writes the complete JSON tool payload to `PATH`
+before `max_chars` is applied. The in-band response still honors `max_chars`
+and includes `full_output_written_to` with the resolved side-file path.
 
 **Important**: `rocq_query` does not consume a state_id — it runs
 relative to the current position without advancing. Repeated queries

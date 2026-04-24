@@ -17,6 +17,7 @@ start at 1, column numbers start at 1).
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import signal
 from pathlib import Path
@@ -40,7 +41,13 @@ def _err() -> Dict[str, Any]:
 
 def _omit_empty_fields(data: Dict[str, Any]) -> Dict[str, Any]:
     """Drop optional response fields when they do not carry information."""
-    empty_optional_fields = {"error", "error_range", "stderr", "startup_stderr"}
+    empty_optional_fields = {
+        "error",
+        "error_range",
+        "full_output_written_to",
+        "stderr",
+        "startup_stderr",
+    }
     return {
         key: value
         for key, value in data.items()
@@ -55,6 +62,25 @@ def _validate_max_chars(max_chars: Optional[int]) -> None:
         raise SessionError("max_chars must be a positive integer")
     if max_chars < 1:
         raise SessionError("max_chars must be a positive integer")
+
+
+def _write_full_output_file(
+    full_output_file: Optional[str],
+    data: Dict[str, Any],
+) -> Optional[str]:
+    """Write an untruncated UTF-8 JSON payload when requested."""
+    if full_output_file is None:
+        return None
+    if not isinstance(full_output_file, str) or full_output_file.strip() == "":
+        raise SessionError("full_output_file must be a non-empty file path")
+
+    path = Path(full_output_file.strip()).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return str(path)
 
 
 def _resolve_content(
@@ -214,6 +240,9 @@ def rocq_step_to(
         "Pass `max_chars=N` to cap every string field in the response to at\n"
         "most N characters, applied separately to each hypothesis,\n"
         "conclusion, name, and stderr string.\n\n"
+        "Pass `full_output_file=PATH` to write the complete tool payload as\n"
+        "UTF-8 JSON before `range` or `max_chars` are applied. The response\n"
+        "then includes `full_output_written_to` with the resolved file path.\n\n"
         "If no proof is in progress, `summary.in_proof` is false."
     )
 )
@@ -221,19 +250,29 @@ def rocq_goals(
     session_id: str,
     range: Optional[List[int]] = None,
     max_chars: Optional[int] = None,
+    full_output_file: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
         _validate_max_chars(max_chars)
         session = _registry.get(session_id)
         goals, _message, stderr = session.goals_text()
+        response_summary = summarize_goals(goals, hypothesis_range=range)
+        full_output_written_to = _write_full_output_file(
+            full_output_file,
+            _omit_empty_fields(
+                {
+                    "ok": True,
+                    "summary": summarize_goals(goals),
+                    "stderr": stderr,
+                }
+            ),
+        )
         return _omit_empty_fields(
             {
                 "ok": True,
-                "summary": truncate_strings(
-                    summarize_goals(goals, hypothesis_range=range),
-                    max_chars,
-                ),
+                "summary": truncate_strings(response_summary, max_chars),
                 "stderr": truncate_strings(stderr, max_chars),
+                "full_output_written_to": full_output_written_to,
             }
         )
     except Exception:  # noqa: BLE001
@@ -247,24 +286,40 @@ def rocq_goals(
         "if missing.\n\n"
         "Does NOT advance the session. Returns the text Rocq would print.\n\n"
         "Pass `max_chars=N` to cap every string field in the response to at\n"
-        "most N characters, applied separately to `message` and `stderr`."
+        "most N characters, applied separately to `message` and `stderr`.\n\n"
+        "Pass `full_output_file=PATH` to write the complete tool payload as\n"
+        "UTF-8 JSON before `max_chars` is applied. The response then includes\n"
+        "`full_output_written_to` with the resolved file path."
     )
 )
 def rocq_query(
     session_id: str,
     query: str,
     max_chars: Optional[int] = None,
+    full_output_file: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
         _validate_max_chars(max_chars)
         session = _registry.get(session_id)
         res = session.query(query)
+        full_output_written_to = _write_full_output_file(
+            full_output_file,
+            _omit_empty_fields(
+                {
+                    "ok": True,
+                    "success": res.success,
+                    "message": res.message,
+                    "stderr": res.stderr,
+                }
+            ),
+        )
         return _omit_empty_fields(
             {
                 "ok": True,
                 "success": res.success,
                 "message": truncate_strings(res.message, max_chars),
                 "stderr": truncate_strings(res.stderr, max_chars),
+                "full_output_written_to": full_output_written_to,
             }
         )
     except Exception:  # noqa: BLE001

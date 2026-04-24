@@ -12,6 +12,7 @@ Run with::
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -322,6 +323,63 @@ def test_live_server_outputs_are_minimal() -> None:
         assert r == {"ok": True, "started": True}
     finally:
         srv.rocq_close(session_id="minimal_outputs")
+
+
+@needs_rocq
+def test_live_server_writes_full_output_file(tmp_path) -> None:
+    """Side-file output keeps the complete payload before response limits."""
+    from coqtail_mcp import server as srv
+
+    src = (
+        "Theorem t : forall A B C : Prop, A -> B -> C -> A.\n"
+        "Proof.\n"
+        "  intros A B C HA HB HC.\n"
+    )
+    goals_file = tmp_path / "goals.json"
+    query_file = tmp_path / "query.json"
+
+    r = srv.rocq_start(session_id="full_output_file", content=src,
+                       coq_path=COQ_PATH, coq_prog=COQ_PROG)
+    try:
+        assert r["ok"], r
+        r = srv.rocq_step_to(session_id="full_output_file", line=3)
+        assert r["success"], r
+
+        r = srv.rocq_goals(
+            session_id="full_output_file",
+            range=[-1, -1],
+            max_chars=3,
+            full_output_file=str(goals_file),
+        )
+        assert r["ok"], r
+        assert r["full_output_written_to"] == str(goals_file.resolve())
+        limited_goal = r["summary"]["fg"][0]
+        assert len(limited_goal["hypotheses"]) == 1
+        assert all(len(hyp) <= 3 for hyp in limited_goal["hypotheses"])
+
+        full_goals = json.loads(goals_file.read_text(encoding="utf-8"))
+        full_goal = full_goals["summary"]["fg"][0]
+        assert full_goals["ok"] is True
+        assert len(full_goal["hypotheses"]) == 4
+        assert any("HA" in hyp for hyp in full_goal["hypotheses"])
+
+        r = srv.rocq_query(
+            session_id="full_output_file",
+            query="Check nat",
+            max_chars=5,
+            full_output_file=str(query_file),
+        )
+        assert r["ok"] and r["success"], r
+        assert r["full_output_written_to"] == str(query_file.resolve())
+        assert len(r["message"]) <= 5
+
+        full_query = json.loads(query_file.read_text(encoding="utf-8"))
+        assert full_query["ok"] is True
+        assert full_query["success"] is True
+        assert "Set" in full_query["message"]
+        assert len(full_query["message"]) > len(r["message"])
+    finally:
+        srv.rocq_close(session_id="full_output_file")
 
 
 @needs_rocq
