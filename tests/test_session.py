@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from coqtail_mcp.session import RocqSession, SessionRegistry, SessionError, _make_buffer  # noqa: E402
-from coqtail_mcp.formatting import format_goals, summarize_goals  # noqa: E402
+from coqtail_mcp.formatting import apply_line_range, format_goals, summarize_goals  # noqa: E402
+from xmlInterface import Goal, Goals  # noqa: E402
 
 
 # ------------------------------------------------------------------ offline
@@ -64,6 +65,49 @@ def test_offline_format_goals_no_proof() -> None:
     assert "No proof in progress" in text
     summary = summarize_goals(None)
     assert summary["in_proof"] is False
+
+
+def test_offline_apply_line_range_positive_and_negative() -> None:
+    text = "one\ntwo\nthree\nfour\nfive\n"
+
+    ranged, meta = apply_line_range(text, [2, 4])
+    assert ranged == "two\nthree\nfour\n"
+    assert meta == {
+        "requested": [2, 4],
+        "resolved": [2, 4],
+        "selected": [2, 4],
+        "total_lines": 5,
+        "truncated": True,
+    }
+
+    ranged, meta = apply_line_range(text, [-2, -1])
+    assert ranged == "four\nfive\n"
+    assert meta["resolved"] == [4, 5]
+    assert meta["selected"] == [4, 5]
+
+
+def test_offline_apply_line_range_rejects_invalid_ranges() -> None:
+    with pytest.raises(ValueError, match="exactly two"):
+        apply_line_range("one\n", [1])
+    with pytest.raises(ValueError, match="non-zero"):
+        apply_line_range("one\n", [0, 1])
+    with pytest.raises(ValueError, match="start must be <= range end"):
+        apply_line_range("one\ntwo\n", [-1, -2])
+
+
+def test_offline_summarize_goals_can_omit_details() -> None:
+    goals = Goals(
+        [Goal(["H1 : nat", "H2 : bool"], "line 1\nline 2", "g")],
+        [],
+        [],
+        [],
+    )
+
+    summary = summarize_goals(goals, include_details=False)
+    assert summary["details_included"] is False
+    assert summary["fg"] == [
+        {"name": "g", "hypothesis_count": 2, "conclusion_line_count": 2}
+    ]
 
 
 # -------------------------------------------------------------------- live

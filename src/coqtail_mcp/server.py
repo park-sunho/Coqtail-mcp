@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from .formatting import format_goals, summarize_goals
+from .formatting import apply_line_range, format_goals, summarize_goals
 from .session import SessionError, SessionRegistry
 
 _registry = SessionRegistry()
@@ -210,23 +210,32 @@ def rocq_step_to(
         "(similar to what `coqtop` would print). `summary` gives a structured\n"
         "view: list of focused goals, each with hypotheses and conclusion,\n"
         "plus counts of background/shelved/admitted goals.\n\n"
+        "Pass `range=[start, end]` to return only an inclusive line range of\n"
+        "the rendered `text`. Positive line numbers are 1-indexed; negative\n"
+        "numbers count from the bottom, so `[-5, -1]` returns the last five\n"
+        "lines. When `range` is set, `summary` omits full hypotheses and\n"
+        "conclusions to keep the response compact.\n\n"
         "If no proof is in progress, `text` says so and `summary.in_proof` is\n"
         "false."
     )
 )
-def rocq_goals(session_id: str) -> Dict[str, Any]:
+def rocq_goals(session_id: str, range: Optional[List[int]] = None) -> Dict[str, Any]:
     try:
         session = _registry.get(session_id)
         goals, message, stderr = session.goals_text()
-        return {
+        text, text_range = apply_line_range(format_goals(goals), range)
+        response = {
             "ok": True,
             "session_id": session_id,
-            "text": format_goals(goals),
-            "summary": summarize_goals(goals),
+            "text": text,
+            "summary": summarize_goals(goals, include_details=range is None),
             "message": message,
             "stderr": stderr,
             "info": _join_info([message], stderr),
         }
+        if text_range is not None:
+            response["text_range"] = text_range
+        return response
     except Exception as e:  # noqa: BLE001
         return _err(e)
 

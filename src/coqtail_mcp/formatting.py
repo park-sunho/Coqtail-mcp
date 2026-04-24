@@ -8,7 +8,7 @@ tags and emit something close to what ``coqtop``'s CLI would show.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from . import _COQTAIL_LIB_DIR  # noqa: F401
 
@@ -23,6 +23,61 @@ def _flatten(text: TextLike) -> str:
     if isinstance(text, str):
         return text
     return join_tagged_tokens(text)
+
+
+def _resolve_line_index(index: int, total_lines: int) -> int:
+    """Resolve a 1-indexed or negative-from-bottom line reference."""
+    if not isinstance(index, int) or isinstance(index, bool):
+        raise ValueError("range entries must be integers")
+    if index == 0:
+        raise ValueError("range entries must be non-zero")
+    if index < 0:
+        return total_lines + index + 1
+    return index
+
+
+def apply_line_range(
+    text: str,
+    line_range: Optional[Sequence[int]],
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """Return ``text`` restricted to an inclusive line range.
+
+    Positive indexes are 1-based. Negative indexes count from the bottom, so
+    ``[-5, -1]`` selects the final five rendered lines.
+    """
+    if line_range is None:
+        return text, None
+    if len(line_range) != 2:
+        raise ValueError("range must contain exactly two entries: [start, end]")
+
+    lines = text.splitlines()
+    total_lines = len(lines)
+    raw_start, raw_end = line_range
+    start = _resolve_line_index(raw_start, total_lines)
+    end = _resolve_line_index(raw_end, total_lines)
+    if start > end:
+        raise ValueError("range start must be <= range end after resolution")
+
+    clipped_start = max(start, 1)
+    clipped_end = min(end, total_lines)
+    if total_lines == 0 or clipped_start > clipped_end:
+        selected = []
+        selected_range = None
+    else:
+        selected = lines[clipped_start - 1 : clipped_end]
+        selected_range = [clipped_start, clipped_end]
+
+    ranged_text = "\n".join(selected)
+    if selected:
+        ranged_text += "\n"
+
+    return ranged_text, {
+        "requested": [raw_start, raw_end],
+        "resolved": [start, end],
+        "selected": selected_range,
+        "total_lines": total_lines,
+        "truncated": selected_range != [1, total_lines],
+    }
 
 
 def format_goals(goals: Optional[Goals]) -> str:
@@ -78,7 +133,7 @@ def format_goals(goals: Optional[Goals]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def summarize_goals(goals: Optional[Goals]) -> dict:
+def summarize_goals(goals: Optional[Goals], *, include_details: bool = True) -> dict:
     """A structured summary alongside the plain-text view.
 
     Useful when the agent wants counts or the raw hypothesis/conclusion
@@ -92,6 +147,26 @@ def summarize_goals(goals: Optional[Goals]) -> dict:
             "shelved": 0,
             "given_up": 0,
         }
+
+    if not include_details:
+        return {
+            "in_proof": True,
+            "fg": [
+                {
+                    "name": g.name,
+                    "hypothesis_count": len(g.hyp),
+                    "conclusion_line_count": len(
+                        _flatten(g.ccl).splitlines() or [""]
+                    ),
+                }
+                for g in goals.fg
+            ],
+            "details_included": False,
+            "bg_count": sum(len(level) for level in goals.bg),
+            "shelved": len(goals.shelved),
+            "given_up": len(goals.given_up),
+        }
+
     return {
         "in_proof": True,
         "fg": [
