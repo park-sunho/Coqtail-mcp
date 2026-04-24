@@ -8,7 +8,7 @@ tags and emit something close to what ``coqtop``'s CLI would show.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 
 from . import _COQTAIL_LIB_DIR  # noqa: F401
 
@@ -16,6 +16,7 @@ from xmlInterface import Goals, TaggedToken, join_tagged_tokens  # type: ignore
 
 
 TextLike = Union[str, Sequence[TaggedToken]]
+T = TypeVar("T")
 
 
 def _flatten(text: TextLike) -> str:
@@ -80,6 +81,34 @@ def apply_line_range(
     }
 
 
+def apply_item_range(
+    items: Sequence[T],
+    item_range: Optional[Sequence[int]],
+) -> List[T]:
+    """Return ``items`` restricted to an inclusive 1-indexed range.
+
+    This shares the public ``range`` convention used by the MCP tools:
+    positive indexes are 1-based and negative indexes count from the end.
+    """
+    if item_range is None:
+        return list(items)
+    if len(item_range) != 2:
+        raise ValueError("range must contain exactly two entries: [start, end]")
+
+    total_items = len(items)
+    raw_start, raw_end = item_range
+    start = _resolve_line_index(raw_start, total_items)
+    end = _resolve_line_index(raw_end, total_items)
+    if start > end:
+        raise ValueError("range start must be <= range end after resolution")
+
+    clipped_start = max(start, 1)
+    clipped_end = min(end, total_items)
+    if total_items == 0 or clipped_start > clipped_end:
+        return []
+    return list(items[clipped_start - 1 : clipped_end])
+
+
 def format_goals(goals: Optional[Goals]) -> str:
     """Render a Coqtail :class:`Goals` object as a single plain-text block."""
     if goals is None:
@@ -133,11 +162,17 @@ def format_goals(goals: Optional[Goals]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def summarize_goals(goals: Optional[Goals], *, include_details: bool = True) -> dict:
+def summarize_goals(
+    goals: Optional[Goals],
+    *,
+    include_details: bool = True,
+    hypothesis_range: Optional[Sequence[int]] = None,
+) -> dict:
     """A structured summary alongside the plain-text view.
 
     Useful when the agent wants counts or the raw hypothesis/conclusion
-    strings without re-parsing the text block.
+    strings without re-parsing the text block. ``hypothesis_range`` limits
+    the hypothesis entries included for each focused goal.
     """
     if goals is None:
         return {
@@ -172,7 +207,10 @@ def summarize_goals(goals: Optional[Goals], *, include_details: bool = True) -> 
         "fg": [
             {
                 "name": g.name,
-                "hypotheses": [_flatten(h) for h in g.hyp],
+                "hypotheses": apply_item_range(
+                    [_flatten(h) for h in g.hyp],
+                    hypothesis_range,
+                ),
                 "conclusion": _flatten(g.ccl),
             }
             for g in goals.fg

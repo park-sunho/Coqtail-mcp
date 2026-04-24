@@ -27,17 +27,15 @@ already work. This project only adds:
 
 | Tool | What it does |
 |------|--------------|
-| `rocq_start`   | Spawn a `coqidetop` subprocess. Accepts either `file_path` or inline `content`. Returns the detected Rocq version. |
+| `rocq_start`   | Spawn a `coqidetop` subprocess. Accepts either `file_path` or inline `content`. Returns the session id and startup stderr. |
 | `rocq_close`   | Terminate a session's subprocess and forget it. |
 | `rocq_step_to` | Advance or rewind so the session's state matches `(line, col)`. Optionally re-reads the original `file_path` from disk (`reload_from_file`) and/or admits opaque proofs (`admit`). |
-| `rocq_goals`   | Return the current proof goal and hypothesis context, both as plain text and as a structured summary. Accepts an optional `range=[start, end]` to return only selected rendered text lines. |
+| `rocq_goals`   | Return the current proof goal and hypothesis context as a structured summary. Accepts an optional `range=[start, end]` to return only selected hypothesis entries. |
 | `rocq_query`   | Run a non-state-changing query (`Check`, `Print`, `Search`, …). |
-| `rocq_status`  | Inspect one session (version, sentence count, endpoint). |
+| `rocq_status`  | Report whether one session is started. |
 | `rocq_list`    | List active session ids. |
 
-All line and column numbers at the tool boundary are **1-indexed**. Every
-state-reading tool also returns a rolled-up `info` field mirroring
-Coqtail's info panel.
+All line and column numbers at the tool boundary are **1-indexed**.
 
 ## Requirements
 
@@ -122,24 +120,24 @@ having to prompt for it.
 
 ```
 rocq_start(session_id="demo", file_path="demo.v")
-# → { version: { str_version: "9.0.0", … } }
+# → { ok: true, session_id: "demo", startup_stderr: "" }
 
 rocq_step_to(session_id="demo", line=6)
-# → { success: true, sentences_applied: 4, endpoint: [6, 7] }
+# → { ok: true, success: true, endpoint: [6, 7],
+#     error: null, error_range: null, stderr: "" }
 
 rocq_goals(session_id="demo")
 # → {
-#     text: "1 subgoal\n\nn : nat\n\n========================= (1 / 1)\n\nn + 0 = n\n",
 #     summary: { in_proof: true, fg: [...], ... }
+#     stderr: ""
 #   }
 
 rocq_goals(session_id="demo", range=[-5, -1])
-# → returns only the last five rendered goal lines. Positive range values are
-#   1-indexed; negative values count from the bottom. With `range` set, the
-#   summary omits full hypotheses/conclusions and returns compact counts.
+# → returns only the last five hypotheses in each focused goal. Positive range
+#   values are 1-indexed; negative values count from the bottom.
 
 rocq_query(session_id="demo", query="Check nat")
-# → { message: "nat : Set", success: true }
+# → { ok: true, success: true, message: "nat : Set", stderr: "" }
 
 rocq_close(session_id="demo")
 ```

@@ -17,17 +17,17 @@ strictly about **driving this particular MCP server correctly**.
 ## Tool summary
 
 All tools accept JSON and return JSON. Errors never raise — they come
-back as `{"ok": false, "error": "...", "error_type": "..."}`. Always
-check `ok` before reading other fields.
+back with `ok: false` in the tool's normal response shape. Always check
+`ok` before reading success fields.
 
 | Tool | Purpose |
 |------|---------|
 | `rocq_start` | Spawn a Rocq session. Pass either `file_path` OR `content`. |
 | `rocq_close` | Terminate and forget a session. |
 | `rocq_step_to` | Advance OR rewind so the state matches `(line, col)`. |
-| `rocq_goals` | Current focused goal + hypotheses, as text and structured summary. Optional `range=[start, end]` slices rendered text lines. |
+| `rocq_goals` | Current focused goal + hypotheses, as a structured summary. Optional `range=[start, end]` slices hypothesis entries. |
 | `rocq_query` | Non-state-changing query (`Check`, `Print`, `Search`, …). |
-| `rocq_status` | Inspect one session (version, sentences sent, current endpoint). |
+| `rocq_status` | Report whether one session is started. |
 | `rocq_list` | List open session ids. |
 
 ## Session lifecycle (must be followed in order)
@@ -64,28 +64,27 @@ keeps a `coqidetop` subprocess alive.
 ```
 rocq_start(session_id="t1", file_path="/abs/path/to/proof.v",
            coq_path="/abs/path/to/_opam/bin")
-  → { ok: true, version: {str_version: "9.1.1", ...} }
+  → { ok: true, session_id: "t1", startup_stderr: "" }
 
 rocq_step_to(session_id="t1", line=12)
-  → { ok: true, success: true, sentences_applied: 5,
-      endpoint: [12, 8], messages: [], error: null }
+  → { ok: true, success: true, endpoint: [12, 8],
+      error: null, error_range: null, stderr: "" }
 
 rocq_goals(session_id="t1")
-  → { text: "1 subgoal\n\nn : nat\n========= (1 / 1)\n\nn + 0 = n\n",
+  → { ok: true,
       summary: { in_proof: true, fg: [{hypotheses: ["n : nat"],
-                                       conclusion: "n + 0 = n"}], ... } }
+                                       conclusion: "n + 0 = n"}], ... },
+      stderr: "" }
 
 rocq_goals(session_id="t1", range=[-5, -1])
-  → returns only the final five rendered goal lines. Positive line numbers are
-    1-indexed; negative numbers count from the bottom. With `range` set, the
-    summary omits full hypotheses/conclusions and keeps compact counts.
+  → returns only the final five hypotheses in each focused goal. Positive
+    values are 1-indexed; negative values count from the bottom.
 
 rocq_close(session_id="t1")
 ```
 
-The `text` field is a human-readable block; `summary.fg[i]` gives the
-hypothesis list and conclusion as separate strings if you need to reason
-about them programmatically.
+`summary.fg[i]` gives the hypothesis list and conclusion as separate
+strings if you need to reason about them programmatically.
 
 ### Stream through a proof one tactic at a time
 
@@ -131,24 +130,18 @@ proofs earlier.
 rocq_step_to(session_id="t1", line=200, admit=true)
 ```
 
-## The `info` field (Coqtail's info panel, rolled up)
+## Compact responses
 
-`rocq_step_to`, `rocq_goals`, and `rocq_query` each return an `info`
-string that mirrors what Coqtail would put in its *info panel* — the
-catch-all buffer that holds everything Rocq says that *isn't* the goal
-view. Sources folded into `info`:
+The MCP tools intentionally return small envelopes:
 
-1. Response messages on every sentence (`idtac "..."` output, warnings,
-   notifications, Q.E.D. acknowledgements).
-2. Async `<message>` / `<feedback>` nodes the XML layer interleaves with
-   responses (universe checks, obligation reports, proof diagnostics).
-3. Rocq's stderr (prefixed with `From stderr:` as Coqtail does).
-4. On failure, the final error message is appended.
+- `rocq_start`: `ok`, `session_id`, `startup_stderr`
+- `rocq_step_to`: `ok`, `success`, `endpoint`, `error`, `error_range`, `stderr`
+- `rocq_goals`: `ok`, `summary`, `stderr`
+- `rocq_query`: `ok`, `success`, `message`, `stderr`
+- `rocq_status`: `ok`, `started`
 
-The structured fields (`messages`, `message`, `stderr`, `error`) remain
-available for agents that want to distinguish the sources. `info` is
-just the convenient concatenation — read that when you want a single
-blob to show the user.
+Per-sentence info-panel messages are kept internally by the session layer but
+are not exposed through the MCP tool response.
 
 Example:
 
@@ -156,17 +149,17 @@ Example:
 rocq_step_to(session_id="t1", line=5)   # file has: idtac "checkpoint reached".
   → {
       ok: true, success: true,
-      messages: ["checkpoint reached"],
-      stderr: "",
+      endpoint: [5, 35],
       error: null,
-      info: "checkpoint reached"
+      error_range: null,
+      stderr: ""
     }
 
 rocq_query(session_id="t1", query="Check no_such_name")
   → {
       ok: true, success: false,
       message: "The reference no_such_name was not found …",
-      info: "The reference no_such_name was not found …"
+      stderr: ""
     }
 ```
 
@@ -187,7 +180,7 @@ blindly; inspect `error` and adjust the buffer or tactic before calling
 { ok: true, success: false,
   error: "The reference foo was not found in the current environment.",
   error_range: [[42, 1], [42, 12]],
-  sentences_applied: 0, endpoint: [41, 14] }
+  endpoint: [41, 14], stderr: "" }
 ```
 
 If a `rocq_step_to` fails mid-batch, the endpoint reflects the last
@@ -236,10 +229,9 @@ against it.
    Use `build_system="prefer-dune"`, `"dune"`, or `"coqproject"` to
    control precedence. Pass `extra_args` for final overrides.
 
-7. **Output is plain text.** Richpp tags (syntax highlighting spans)
-   are stripped. If the user specifically wants highlighting, that
-   information is not currently exposed; read the raw `coqidetop`
-   output yourself if needed.
+7. **Rocq output strings are plain text.** Richpp tags (syntax
+   highlighting spans) are stripped from conclusions, hypotheses, query
+   messages, and errors.
 
 ## When this skill is NOT the right answer
 

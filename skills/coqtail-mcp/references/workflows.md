@@ -15,11 +15,8 @@ step to past-the-end and read the `error` field.
 ```
 rocq_start(session_id="audit", file_path="/abs/f.v", coq_path="/.../_opam/bin")
 
-status = rocq_status(session_id="audit")
-N = status["buffer_lines"]
+N = <line count of /abs/f.v from your normal file-reading tools>
 
-r = rocq_step_to(session_id="audit", line=N + 1)   # past the last line
-# Wait — N+1 is past the buffer; use a column past the end on N instead:
 r = rocq_step_to(session_id="audit", line=N)
 
 if r["success"]:

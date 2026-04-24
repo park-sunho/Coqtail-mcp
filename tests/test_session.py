@@ -110,6 +110,24 @@ def test_offline_summarize_goals_can_omit_details() -> None:
     ]
 
 
+def test_offline_summarize_goals_can_slice_hypotheses() -> None:
+    goals = Goals(
+        [Goal(["H1 : nat", "H2 : bool", "H3 : Prop"], "True", "g")],
+        [],
+        [],
+        [],
+    )
+
+    summary = summarize_goals(goals, hypothesis_range=[-2, -1])
+    assert summary["fg"] == [
+        {
+            "name": "g",
+            "hypotheses": ["H2 : bool", "H3 : Prop"],
+            "conclusion": "True",
+        }
+    ]
+
+
 # -------------------------------------------------------------------- live
 
 
@@ -193,42 +211,49 @@ def test_live_query_check(session: RocqSession) -> None:
 
 
 @needs_rocq
-def test_live_info_rollup_carries_idtac_and_errors(session: RocqSession) -> None:
-    """Whatever would land in Coqtail's info panel shows up in `info`."""
+def test_live_server_outputs_are_minimal() -> None:
+    """Server tools expose only the compact public response shape."""
     from coqtail_mcp import server as srv
 
     src = (
-        "Theorem t : 1 = 1.\n"
+        "Theorem t : forall A B C : Prop, A -> B -> C -> A.\n"
         "Proof.\n"
-        '  idtac "hello-from-idtac".\n'
-        "  reflexivity.\n"
-        "Qed.\n"
-        "Fail Definition bad : nat := true.\n"
+        "  intros A B C HA HB HC.\n"
     )
 
-    r = srv.rocq_start(session_id="info_rollup", content=src,
+    r = srv.rocq_start(session_id="minimal_outputs", content=src,
                        coq_path=COQ_PATH, coq_prog=COQ_PROG)
     try:
         assert r["ok"], r
+        assert set(r) == {"ok", "session_id", "startup_stderr"}
 
-        r = srv.rocq_step_to(session_id="info_rollup", line=5)
+        r = srv.rocq_step_to(session_id="minimal_outputs", line=3)
         assert r["success"]
-        assert "hello-from-idtac" in r["info"], r["info"]
+        assert set(r) == {
+            "ok",
+            "success",
+            "endpoint",
+            "error",
+            "error_range",
+            "stderr",
+        }
 
-        r = srv.rocq_step_to(session_id="info_rollup", line=6)
-        assert r["success"]
-        assert "indeed failed" in r["info"], r["info"]
-
-        r = srv.rocq_query(session_id="info_rollup",
+        r = srv.rocq_query(session_id="minimal_outputs",
                            query="Check no_such_identifier")
+        assert set(r) == {"ok", "success", "message", "stderr"}
         assert r["success"] is False
-        assert "not found" in r["info"], r["info"]
+        assert "not found" in r["message"], r["message"]
 
-        r = srv.rocq_goals(session_id="info_rollup")
-        assert "message" in r
-        assert "info" in r
+        r = srv.rocq_goals(session_id="minimal_outputs", range=[-1, -1])
+        assert set(r) == {"ok", "summary", "stderr"}
+        hypotheses = r["summary"]["fg"][0]["hypotheses"]
+        assert len(hypotheses) == 1
+        assert "HC" in hypotheses[0]
+
+        r = srv.rocq_status(session_id="minimal_outputs")
+        assert r == {"ok": True, "started": True}
     finally:
-        srv.rocq_close(session_id="info_rollup")
+        srv.rocq_close(session_id="minimal_outputs")
 
 
 @needs_rocq

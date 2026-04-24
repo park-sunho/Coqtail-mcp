@@ -3,9 +3,9 @@
 Per-tool inputs, outputs, and failure modes. Paired with
 [SKILL.md](../SKILL.md), which covers the higher-level workflow.
 
-All tools return a JSON object with an `ok` boolean. If `ok` is `false`,
-the call itself was rejected; only `error` and `error_type` are
-meaningful. If `ok` is `true`, the remaining fields are populated.
+All tools return a JSON object with an `ok` boolean. The primary tools expose
+compact envelopes so agents do not spend context on metadata they did not ask
+for.
 
 ---
 
@@ -36,20 +36,7 @@ Spawn a `coqidetop` subprocess and create a new session.
 {
   "ok": true,
   "session_id": "t1",
-  "filename": "/abs/path/to/proof.v",
-  "version": { "version": [9,1,1], "str_version": "9.1.1", "latest": null },
-  "startup_stderr": "",
-  "project": {
-    "build_system": "prefer-coqproject",
-    "project_search_dirs": [".", "./theories"],
-    "project_files": ["/abs/path/_CoqProject"],
-    "coqproject_args": ["-Q", "/abs/path/theory", "MyLib"],
-    "launch_args": ["-Q", "/abs/path/theory", "MyLib"],
-    "in_dune_project": false,
-    "use_dune": false,
-    "dune_project_file": null,
-    "dune_compile_deps": false
-  }
+  "startup_stderr": ""
 }
 ```
 
@@ -109,16 +96,11 @@ admitted proofs triggered by `admit=true`).
 ```json
 {
   "ok": true,
-  "session_id": "t1",
   "success": true,
   "endpoint": [12, 8],
-  "sentences_applied": 3,
-  "sentences_rewound": 0,
-  "messages": [],
   "error": null,
   "error_range": null,
-  "stderr": "",
-  "info": ""
+  "stderr": ""
 }
 ```
 
@@ -126,11 +108,6 @@ admitted proofs triggered by `admit=true`).
   reflects the last **successful** position; the session is fully
   consistent with that state.
 - `error_range` is 1-indexed `[[start_line, start_col], [end_line, end_col]]`.
-- `messages` is one string per sentence — `idtac` output, warnings,
-  notifications, `Fail` directive diagnostics, etc.
-- `info` is the rolled-up *Coqtail-info-panel* equivalent:
-  `messages ++ stderr ++ error`, newline-separated. Convenient when you
-  just want to show the user everything Rocq said that wasn't the goal.
 
 **Semantics**
 
@@ -158,15 +135,13 @@ current endpoint.
 | Name         | Type           | Required | Notes |
 |--------------|----------------|----------|-------|
 | `session_id` | string         | yes      | |
-| `range`      | array of 2 ints | no      | Inclusive rendered-text line range. Positive values are 1-indexed; negative values count from the bottom, so `[-5, -1]` returns the last five lines. Zero is invalid. |
+| `range`      | array of 2 ints | no      | Inclusive hypothesis-entry range for each focused goal. Positive values are 1-indexed; negative values count from the bottom, so `[-5, -1]` returns the last five hypotheses. Zero is invalid. |
 
 **Returns**
 
 ```json
 {
   "ok": true,
-  "session_id": "t1",
-  "text": "1 subgoal\n\nn : nat\n\n========================= (1 / 1)\n\nn + 0 = n\n",
   "summary": {
     "in_proof": true,
     "fg": [
@@ -178,30 +153,17 @@ current endpoint.
     "shelved": 0,
     "given_up": 0
   },
-  "message": "",
-  "stderr": "",
-  "info": ""
+  "stderr": ""
 }
 ```
 
-- `text` is a rendered view close to what `coqtop` prints; preserve line
-  breaks if you show it to the user.
-- `range=[start, end]` slices only the rendered `text`. When supplied,
-  `text_range` reports the requested, resolved, and selected line numbers.
-  With `range` set, `summary.fg` omits full hypotheses/conclusions and
-  instead returns compact per-goal counts to avoid spending context on the
-  data you intentionally did not request.
-- `message` is the `Subgoals` RPC's side-message channel — normally
-  empty, but Rocq sometimes attaches diagnostics (e.g. when proof diffs
-  are on). Mirrored into `info`.
-- `info` rolls up `message` + `stderr` like the other tools, so a single
-  field shows anything Rocq printed while answering the Goal call.
+- `range=[start, end]` slices `summary.fg[*].hypotheses` only. Conclusions
+  and goal counts are still returned.
 - `summary.fg` lists the **focused** goals — those the user's next tactic
   will act on. `summary.bg_count`, `shelved`, `given_up` give counts
   without details (use the MathComp/stdlib tactics `unshelve`, etc. to
   bring shelved goals into focus if needed).
-- When no proof is in progress: `text = "No proof in progress."`,
-  `summary.in_proof = false`.
+- When no proof is in progress: `summary.in_proof = false`.
 
 ---
 
@@ -221,18 +183,14 @@ Run a query that does not change the proof state.
 ```json
 {
   "ok": true,
-  "session_id": "t1",
   "success": true,
   "message": "nat\n     : Set",
-  "stderr": "",
-  "info": "nat\n     : Set"
+  "stderr": ""
 }
 ```
 
 When Rocq rejects the query (e.g. unknown identifier), `success` is
-`false` and `message` contains Rocq's error text. `info` is the
-Coqtail-panel rollup — for `rocq_query` it is essentially `message`
-plus any stderr, since the query response *is* the info content.
+`false` and `message` contains Rocq's error text.
 
 **Important**: `rocq_query` does not consume a state_id — it runs
 relative to the current position without advancing. Repeated queries
@@ -249,29 +207,11 @@ Inspect metadata about a session without modifying it.
 ```json
 {
   "ok": true,
-  "session_id": "t1",
-  "filename": "/abs/path/to/proof.v",
-  "started": true,
-  "version": { "version": [9,1,1], "str_version": "9.1.1", "latest": null },
-  "sentences_sent": 3,
-  "endpoint": [12, 8],
-  "buffer_lines": 42,
-  "coq_path": "/home/u/.opam/my-switch/bin",
-  "coq_prog": null,
-  "extra_args": ["-w", "all"],
-  "project": {
-    "build_system": "prefer-coqproject",
-    "project_search_dirs": [".", "./theories"],
-    "project_files": ["/abs/path/_CoqProject"],
-    "launch_args": ["-Q", "/abs/path/theory", "MyLib", "-w", "all"],
-    "use_dune": false
-  }
+  "started": true
 }
 ```
 
-Useful for debugging — e.g. to confirm the buffer has the expected
-number of lines, or to figure out why `rocq_step_to(line=50)` rejects
-with "past the buffer".
+Useful as a cheap session liveness check.
 
 ---
 

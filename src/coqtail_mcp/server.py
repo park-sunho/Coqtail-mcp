@@ -7,7 +7,7 @@ Tools
 ``rocq_step_to`` — advance or rewind so the state matches a given line/col
 ``rocq_goals``   — return the current goal and hypothesis context
 ``rocq_query``   — run a non-state-changing query (``Check``, ``Print``, …)
-``rocq_status``  — inspect one session (bonus, zero-cost helper)
+``rocq_status``  — report whether one session is started
 ``rocq_list``    — list active sessions
 
 All positions passed to and from these tools are **1-indexed** (line numbers
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from .formatting import apply_line_range, format_goals, summarize_goals
+from .formatting import summarize_goals
 from .session import SessionError, SessionRegistry
 
 _registry = SessionRegistry()
@@ -34,32 +34,8 @@ mcp = FastMCP("coqtail-mcp")
 
 
 def _err(e: Exception) -> Dict[str, Any]:
-    """Standard error envelope. We return structured errors instead of raising
-    so the agent gets a JSON result rather than an MCP transport error."""
+    """Error envelope for tools that do not define a compact error shape."""
     return {"ok": False, "error": str(e), "error_type": type(e).__name__}
-
-
-def _join_info(
-    messages: Optional[List[str]],
-    stderr: Optional[str] = "",
-    error: Optional[str] = None,
-) -> str:
-    """Roll up everything that would appear in Coqtail's 'info' panel.
-
-    Concatenates per-sentence Rocq response messages, the stderr stream, and
-    (on failure) the final error — dropping empties and prefixing stderr so
-    it's distinguishable from Rocq's own output, mirroring Coqtail's
-    ``print_stderr``.
-    """
-    parts: List[str] = []
-    for m in messages or []:
-        if m:
-            parts.append(m)
-    if stderr:
-        parts.append(f"From stderr:\n{stderr}")
-    if error:
-        parts.append(error)
-    return "\n\n".join(parts)
 
 
 def _resolve_content(
@@ -114,6 +90,7 @@ def rocq_start(
     strict_stderr: bool = False,
     init_timeout: Optional[int] = 60,
 ) -> Dict[str, Any]:
+    public_session_id = session_id
     try:
         buffer, resolved = _resolve_content(file_path, content)
         session = _registry.create(
@@ -130,14 +107,23 @@ def rocq_start(
             stderr_is_warning=not strict_stderr,
             init_timeout=init_timeout,
         )
+        public_session_id = session.session_id
         try:
             info = session.start()
         except Exception:
             _registry.drop(session.session_id).close()
             raise
-        return {"ok": True, **info}
+        return {
+            "ok": True,
+            "session_id": info["session_id"],
+            "startup_stderr": info["startup_stderr"],
+        }
     except Exception as e:  # noqa: BLE001
-        return _err(e)
+        return {
+            "ok": False,
+            "session_id": public_session_id,
+            "startup_stderr": str(e),
+        }
 
 
 @mcp.tool(
@@ -188,56 +174,58 @@ def rocq_step_to(
         result = session.step_to(line, col, admit=admit)
         return {
             "ok": True,
-            "session_id": session_id,
             "success": result.success,
             "endpoint": result.endpoint,
-            "sentences_applied": result.sentences_applied,
-            "sentences_rewound": result.sentences_rewound,
-            "messages": result.messages,
             "error": result.error,
             "error_range": result.error_range,
             "stderr": result.stderr,
-            "info": _join_info(result.messages, result.stderr, result.error),
         }
     except Exception as e:  # noqa: BLE001
-        return _err(e)
+        return {
+            "ok": False,
+            "success": False,
+            "endpoint": None,
+            "error": str(e),
+            "error_range": None,
+            "stderr": "",
+        }
 
 
 @mcp.tool(
     description=(
         "Return the current proof goal and hypothesis context.\n\n"
-        "`text` is a pretty-printed block suitable for display to the user\n"
-        "(similar to what `coqtop` would print). `summary` gives a structured\n"
-        "view: list of focused goals, each with hypotheses and conclusion,\n"
-        "plus counts of background/shelved/admitted goals.\n\n"
-        "Pass `range=[start, end]` to return only an inclusive line range of\n"
-        "the rendered `text`. Positive line numbers are 1-indexed; negative\n"
-        "numbers count from the bottom, so `[-5, -1]` returns the last five\n"
-        "lines. When `range` is set, `summary` omits full hypotheses and\n"
-        "conclusions to keep the response compact.\n\n"
-        "If no proof is in progress, `text` says so and `summary.in_proof` is\n"
-        "false."
+        "`summary` gives a structured view: list of focused goals, each with\n"
+        "hypotheses and conclusion, plus counts of background/shelved/admitted\n"
+        "goals.\n\n"
+        "Pass `range=[start, end]` to return only an inclusive range of\n"
+        "hypothesis entries for each focused goal. Positive indexes are\n"
+        "1-indexed; negative indexes count from the bottom, so `[-5, -1]`\n"
+        "returns the last five hypotheses.\n\n"
+        "If no proof is in progress, `summary.in_proof` is false."
     )
 )
 def rocq_goals(session_id: str, range: Optional[List[int]] = None) -> Dict[str, Any]:
     try:
         session = _registry.get(session_id)
-        goals, message, stderr = session.goals_text()
-        text, text_range = apply_line_range(format_goals(goals), range)
-        response = {
+        goals, _message, stderr = session.goals_text()
+        return {
             "ok": True,
-            "session_id": session_id,
-            "text": text,
-            "summary": summarize_goals(goals, include_details=range is None),
-            "message": message,
+            "summary": summarize_goals(goals, hypothesis_range=range),
             "stderr": stderr,
-            "info": _join_info([message], stderr),
         }
-        if text_range is not None:
-            response["text_range"] = text_range
-        return response
     except Exception as e:  # noqa: BLE001
-        return _err(e)
+        return {
+            "ok": False,
+            "summary": {
+                "in_proof": False,
+                "fg": [],
+                "bg_count": 0,
+                "shelved": 0,
+                "given_up": 0,
+                "error": str(e),
+            },
+            "stderr": "",
+        }
 
 
 @mcp.tool(
@@ -254,23 +242,26 @@ def rocq_query(session_id: str, query: str) -> Dict[str, Any]:
         res = session.query(query)
         return {
             "ok": True,
-            "session_id": session_id,
             "success": res.success,
             "message": res.message,
             "stderr": res.stderr,
-            "info": _join_info([res.message], res.stderr),
         }
     except Exception as e:  # noqa: BLE001
-        return _err(e)
+        return {
+            "ok": False,
+            "success": False,
+            "message": str(e),
+            "stderr": "",
+        }
 
 
-@mcp.tool(description="Inspect one session (version, sentence count, endpoint, …).")
+@mcp.tool(description="Report whether one session is started.")
 def rocq_status(session_id: str) -> Dict[str, Any]:
     try:
         session = _registry.get(session_id)
-        return {"ok": True, **session.status()}
-    except Exception as e:  # noqa: BLE001
-        return _err(e)
+        return {"ok": True, "started": session.status()["started"]}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "started": False}
 
 
 @mcp.tool(description="List the ids of all currently-open sessions.")
