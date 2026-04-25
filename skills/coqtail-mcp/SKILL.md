@@ -49,6 +49,9 @@ keeps a `coqidetop` subprocess alive.
 
 - `line` and `col` at the tool boundary are **1-indexed** (line 1 is the
   first line of the file; col 1 is the first column).
+- `line=-1` is an explicit EOF target that ignores `col`. Use it when you
+  want to run through the whole buffer, especially for files with trailing
+  blank lines.
 - `line` values past the end of the buffer are accepted and clamped to EOF.
 - `col` is optional on `rocq_step_to`; when omitted, the server targets
   end-of-line (inclusive of any terminating `.`).

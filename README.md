@@ -36,6 +36,8 @@ already work. This project only adds:
 | `rocq_list`    | List active session ids. |
 
 All line and column numbers at the tool boundary are **1-indexed**.
+For `rocq_step_to`, `line=-1` is an explicit EOF target; use it when
+running through a whole buffer, including files that end with blank lines.
 
 ## Requirements
 

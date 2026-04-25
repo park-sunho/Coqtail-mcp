@@ -94,7 +94,7 @@ admitted proofs triggered by `admit=true`).
 | Name               | Type   | Required | Notes |
 |--------------------|--------|----------|-------|
 | `session_id`       | string | yes      | |
-| `line`             | int    | yes      | 1-indexed. Values past the end of the buffer are clamped to EOF. |
+| `line`             | int    | yes      | 1-indexed. Use `-1` for EOF. Values past the end of the buffer are also clamped to EOF. |
 | `col`              | int    | no       | 1-indexed. Defaults to end-of-line (inclusive of any terminator on that line). |
 | `reload_from_file` | bool   | no       | Default `false`. When `true`, the server re-reads the `file_path` supplied to `rocq_start` and replaces the buffer before stepping. Only the sentences affected by the diff are rewound. Fails when the session was opened with inline `content` or when the file no longer exists. |
 | `admit`            | bool   | no       | Default `false`. When `true`, opaque proofs (`Qed.`/`Admitted.`) encountered during the advance are replaced with `Admitted.`. |
@@ -121,13 +121,16 @@ admitted proofs triggered by `admit=true`).
 - A sentence is included iff its closing `.` is at or before `(line, col)`.
 - `step_to(L, C)` from a further-along state rewinds to the greatest
   endpoint that still satisfies the above rule.
+- `step_to(line=-1)` targets EOF directly and ignores `col`. This is the
+  preferred way to run the whole buffer because the returned `endpoint` still
+  reports the last executed sentence, not trailing blank lines.
 - The top of a file is reached with `step_to(line=1, col=1)` — it
   rewinds everything.
 
 **Common failures at the envelope level**
 
 - `session not started` — you skipped `rocq_start`
-- `line must be >= 1` / `col must be >= 1` — 0-indexed mistake
+- `line must be -1 (EOF) or >= 1` / `col must be >= 1` — invalid position
 
 These rejected tool calls return `{ "ok": false, "error": "..." }`.
 

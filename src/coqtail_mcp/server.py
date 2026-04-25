@@ -11,7 +11,7 @@ Tools
 ``rocq_list``    — list active sessions
 
 All positions passed to and from these tools are **1-indexed** (line numbers
-start at 1, column numbers start at 1).
+start at 1, column numbers start at 1). ``rocq_step_to(line=-1)`` targets EOF.
 """
 
 from __future__ import annotations
@@ -198,9 +198,10 @@ def rocq_close(session_id: str) -> Dict[str, Any]:
 @mcp.tool(
     description=(
         "Advance or rewind the session so its state matches a position in\n"
-        "the buffer. `line` is 1-indexed; values past the end of the buffer\n"
-        "are clamped to EOF. `col` is optional (defaults to\n"
-        "end-of-line).\n\n"
+        "the buffer. `line` is 1-indexed; pass `line=-1` to target EOF\n"
+        "(ignoring `col`).\n"
+        "Values past the end of the buffer are also clamped to EOF. `col`\n"
+        "is optional (defaults to end-of-line).\n\n"
         "Semantics match Coqtail's `to_line`: every sentence whose terminator\n"
         "is at or before `(line, col)` will have been executed; everything\n"
         "after it will have been rewound via `Edit_at`.\n\n"

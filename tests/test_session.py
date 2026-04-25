@@ -58,6 +58,13 @@ def test_offline_resolve_target_clamps_oversized_line_to_eof() -> None:
     assert _resolve_target(buf, 99, 1) == (2, 9)
 
 
+def test_offline_resolve_target_negative_one_means_eof() -> None:
+    buf = _make_buffer("Theorem t : True.\nProof.\n  exact I.\n\n")
+
+    assert _resolve_target(buf, -1, None) == (4, 0)
+    assert _resolve_target(buf, -1, 1) == (4, 0)
+
+
 def test_offline_registry_create_and_drop() -> None:
     reg = SessionRegistry()
     s = reg.create(session_id="foo", content="")

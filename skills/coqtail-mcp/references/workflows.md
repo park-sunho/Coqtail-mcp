@@ -10,14 +10,12 @@ Pair with [tools.md](tools.md) for per-tool argument detail.
 
 Goal: determine whether a `.v` file type-checks, and if not, where.
 Don't use `rocq_compile` for this — that's a different server. Here we
-step to past-the-end and read the `error` field.
+step to EOF and read the `error` field.
 
 ```
 rocq_start(session_id="audit", file_path="/abs/f.v", coq_path="/.../_opam/bin")
 
-N = <line count of /abs/f.v from your normal file-reading tools>
-
-r = rocq_step_to(session_id="audit", line=N)
+r = rocq_step_to(session_id="audit", line=-1)
 
 if r["success"]:
     # File type-checks; endpoint is the end of the last sentence.
@@ -28,10 +26,9 @@ else:
 rocq_close(session_id="audit")
 ```
 
-**Why step to the last line, not `N+1`?** The server rejects positions
-past the buffer to catch off-by-one bugs early. Stepping to `line=N`
-with `col=None` advances to end-of-line on the last line, which is all
-the remaining sentences.
+**Why `line=-1`?** The response `endpoint` is the last executed sentence,
+not a visual cursor. If a file ends with blank lines, a successful EOF step
+can still report an endpoint on the final tactic line.
 
 ---
 

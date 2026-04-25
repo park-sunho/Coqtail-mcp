@@ -222,10 +222,11 @@ class RocqSession:
     ) -> StepResult:
         """Advance or rewind so everything up to ``(line, col)`` has executed.
 
-        ``line`` is 1-indexed. If ``col`` is ``None``, we target end-of-line
-        (inclusive of any dot on that line). ``admit`` follows Coqtail's
-        semantics: opaque proofs between ``Proof.`` and ``Qed.``/``Defined.``
-        are replaced with a single ``Admitted.`` on the fly.
+        ``line`` is 1-indexed, with ``-1`` meaning EOF. If ``col`` is
+        ``None``, we target end-of-line (inclusive of any dot on that line).
+        ``admit`` follows Coqtail's semantics: opaque proofs between
+        ``Proof.`` and ``Qed.``/``Defined.`` are replaced with a single
+        ``Admitted.`` on the fly.
         """
         if not self._started:
             raise SessionError("session not started")
@@ -483,16 +484,19 @@ def _make_buffer(content: str) -> List[bytes]:
 def _resolve_target(buf: List[bytes], line: int, col: Optional[int]) -> Position:
     """Convert a user-facing (1-indexed line, optional 1-indexed col) to the
     0-indexed form Coqtail expects. When col is omitted, aim at end-of-line.
-    Lines past the buffer clamp to EOF.
+    Line ``-1`` means EOF and ignores ``col``. Lines past the buffer also
+    clamp to EOF.
     """
+    if line == -1:
+        return _eof_target(buf)
     if line < 1:
-        raise SessionError(f"line must be >= 1, got {line}")
+        raise SessionError(f"line must be -1 (EOF) or >= 1, got {line}")
     if col is not None and col < 1:
         raise SessionError(f"col must be >= 1, got {col}")
 
     tline = min(line, len(buf)) - 1
     if line > len(buf):
-        return (tline, max(0, len(buf[tline]) - 1) if buf[tline] else 0)
+        return _eof_target(buf)
 
     if col is None:
         # End of the line — use (line, len(line)-1) so the terminator dot on
@@ -501,6 +505,12 @@ def _resolve_target(buf: List[bytes], line: int, col: Optional[int]) -> Position
     else:
         tcol = col - 1
     return (tline, tcol)
+
+
+def _eof_target(buf: List[bytes]) -> Position:
+    """Return the final addressable buffer position, including blank lines."""
+    tline = len(buf) - 1
+    return (tline, max(0, len(buf[tline]) - 1) if buf[tline] else 0)
 
 
 def _derive_error_range(
