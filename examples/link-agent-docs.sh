@@ -16,7 +16,7 @@ project_dir=$(CDPATH= cd -- "$1" && pwd -P)
 
 link_doc() {
   name=$1
-  src=$script_dir/$name
+  src=$script_dir/AGENTS_CLAUDE.md
   dest=$project_dir/$name
 
   if [ ! -f "$src" ]; then

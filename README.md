@@ -116,6 +116,11 @@ With the skill active, Claude will automatically follow server-specific
 guidance (e.g. "leave `coq_prog` blank on Rocq ≥ 8.9") without you
 having to prompt for it.
 
+For project-level agent instructions, `examples/AGENTS_CLAUDE.md` contains
+shared guidance for Codex (`AGENTS.md`) and Claude (`CLAUDE.md`). Run
+`examples/link-agent-docs.sh /path/to/project` to create both symlinks in a
+target project.
+
 ## Example session (pseudocode for the agent)
 
 ```
@@ -198,7 +203,9 @@ Coqtail-mcp/
 │   └── test_session.py      # offline + live smoke tests
 ├── examples/
 │   ├── demo.v               # sample Coq file used by tests
-│   └── mcp_config.json      # sample Claude Code config
+│   ├── mcp_config.json      # sample Claude Code config
+│   ├── AGENTS_CLAUDE.md     # shared agent instructions for Codex/Claude
+│   └── link-agent-docs.sh   # links AGENTS.md and CLAUDE.md into a project
 ├── skills/
 │   └── coqtail-mcp/         # Claude Code skill for this server
 │       ├── SKILL.md
