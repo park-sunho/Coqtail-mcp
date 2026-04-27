@@ -1,7 +1,15 @@
 MIT License
 
 Copyright (c) 2026 Sunho Park
-Portions vendored from Coqtail, Copyright (c) 2017 whonore (MIT-licensed).
+
+This project includes:
+  - Vendored Coqtail XML-protocol client modules under
+    src/coqtail_mcp/coqtail_lib/, Copyright (c) 2017 whonore (MIT-licensed).
+  - Claude Code skill content under skills/coqtail-mcp/ and named
+    subagents under agents/, adapted from LLM4Rocq/rocq-skills
+    (Apache-2.0 licensed, https://github.com/LLM4Rocq/rocq-skills).
+    Adaptations are retargeted to this server's primitives and renamed
+    under the coqtail-mcp namespace.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,0 +1,6 @@
+{
+  "name": "coqtail-mcp",
+  "version": "0.1.0",
+  "description": "Drive a live Rocq/Coq proof session through coqtail-mcp. Bundles the skill (server mechanics + proof recipes) and four named subagents (proof-repair, admitted-filler-deep, axiom-auditor, proof-golfer).",
+  "author": {"name": "Sunho Park"}
+}

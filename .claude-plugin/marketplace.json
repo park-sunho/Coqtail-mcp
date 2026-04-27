@@ -1,0 +1,17 @@
+{
+  "name": "coqtail-mcp",
+  "owner": {
+    "name": "Sunho Park"
+  },
+  "metadata": {
+    "description": "Marketplace for the coqtail-mcp Claude Code plugin: a skill plus four named subagents that drive a live Rocq/Coq proof session through the coqtail-mcp MCP server.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "coqtail-mcp",
+      "description": "Drive a live Rocq/Coq proof session through coqtail-mcp. Bundles the skill (server mechanics + proof recipes) and four named subagents (proof-repair, admitted-filler-deep, axiom-auditor, proof-golfer).",
+      "source": "./plugins/coqtail-mcp"
+    }
+  ]
+}

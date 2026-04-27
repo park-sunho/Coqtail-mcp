@@ -9,8 +9,7 @@ Pair with [tools.md](tools.md) for per-tool argument detail.
 ## 1. Audit a file: run to the end and report errors
 
 Goal: determine whether a `.v` file type-checks, and if not, where.
-Don't use `rocq_compile` for this — that's a different server. Here we
-step to EOF and read the `error` field.
+Step to EOF and read the `error` field.
 
 ```
 rocq_start(session_id="audit", file_path="/abs/f.v", coq_path="/.../_opam/bin")
@@ -249,3 +248,118 @@ Legitimate reasons:
 Each session is its own `coqidetop` subprocess — expect ~30–100 MB of
 resident memory per live session and a few hundred ms startup overhead.
 Don't spin up one session per tactic candidate if recipe 4(b) would do.
+
+---
+
+## 11. Fill an `Admitted` with library search first
+
+The Admitted-filling inner loop. The file on disk is the source of
+truth — tactics are tested by editing the buffer and asking the
+server to reload it.
+
+```
+rocq_start(session_id="fill", file_path="/abs/F.v",
+           coq_path="/.../_opam/bin")
+
+# Position to just before the Admitted so the goal is visible.
+rocq_step_to(session_id="fill", line=PROOF_FIRST_LINE - 1)
+g = rocq_goals(session_id="fill")
+# g["summary"]["fg"][0]["conclusion"] tells you what to prove.
+
+# Search before writing tactics. Cheap and idempotent.
+rocq_query(session_id="fill",
+           query="Search (...pattern from the goal...).")
+rocq_query(session_id="fill",
+           query="Check candidate_lemma.")
+
+# Edit the .v file: replace `Admitted.` with the candidate proof.
+# Then step through it. reload_from_file diffs the buffer and rewinds
+# only what's necessary.
+r = rocq_step_to(session_id="fill", line=PROOF_LAST_LINE,
+                 reload_from_file=true)
+
+if r["success"]:
+    # Optional: run to EOF to make sure downstream sentences still
+    # type-check (changing Admitted to Qed can rarely affect them).
+    rocq_step_to(session_id="fill", line=-1, reload_from_file=true)
+else:
+    # Read r["error"] / r["error_range"]; revise the proof body and
+    # re-step. The session rewinds itself based on the new diff.
+    ...
+
+rocq_close(session_id="fill")
+```
+
+For the higher-level guidance behind this loop (search-first principle,
+candidate generation, when to escalate), see
+[proof-recipes.md](proof-recipes.md).
+
+---
+
+## 12. Audit axioms used by a theorem
+
+Once a theorem closes, confirm it depends only on the standard
+axiom set. `rocq_query` does not change session state, so this is
+safe at any point after the theorem has been executed.
+
+```
+rocq_step_to(session_id="audit", line=THEOREM_END_LINE)
+rocq_query(session_id="audit",
+           query="Print Assumptions theorem_name.")
+```
+
+Interpret the response:
+
+- `Closed under the global context` → no axioms; ideal.
+- Lists only standard names (`classic`, `NNPP`,
+  `functional_extensionality`, `propositional_extensionality`,
+  `proof_irrelevance`, `JMeq_eq`, real-number axioms) → acceptable.
+- Lists project-local `Axiom` / `Parameter` / `Conjecture` → flag to
+  the user; the proof depends on something unproven in the project.
+
+For per-theorem auditing across a file, use `rocq_query` repeatedly —
+it's cheap.
+
+---
+
+## 13. Test multiple tactic candidates serially in one session
+
+When you have a handful of candidates and the proof preamble is
+non-trivial, recipe 4(b) (single session, edit + reload between
+each) is usually cheaper than spawning a session per candidate.
+
+```
+rocq_start(session_id="probe", file_path="/abs/F.v",
+           coq_path="/.../_opam/bin")
+
+candidates = [
+    "intros; reflexivity.",
+    "intros; lia.",
+    "intros; ring.",
+    "intros; auto.",
+    "intros n; induction n; simpl; auto.",
+]
+
+winners = []
+for cand in candidates:
+    # Replace the body between Proof. and Qed./Admitted. with `cand`,
+    # then write the file back to /abs/F.v.
+    write_file_with(cand)
+
+    # Step to just before the proof, then through it. The first call
+    # rewinds (via diff) to the pre-proof state; the second tries the
+    # candidate.
+    rocq_step_to(session_id="probe", line=PROOF_FIRST_LINE - 1,
+                 reload_from_file=true)
+    r = rocq_step_to(session_id="probe", line=PROOF_LAST_LINE,
+                     reload_from_file=true)
+    if r["success"]:
+        winners.append(cand)
+
+rocq_close(session_id="probe")
+```
+
+**When to prefer multiple sessions instead** (recipe 4(a)): the
+preamble is very large *and* you have only a few candidates, so
+session-startup amortizes. Otherwise this serial loop is faster
+because `reload_from_file` only re-checks the diffed sentences.

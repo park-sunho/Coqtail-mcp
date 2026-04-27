@@ -219,9 +219,9 @@ when non-empty.
 before `max_chars` is applied. The in-band response still honors `max_chars`
 and includes `full_output_written_to` with the resolved side-file path.
 
-**Important**: `rocq_query` does not consume a state_id — it runs
-relative to the current position without advancing. Repeated queries
-are free.
+**Important**: `rocq_query` does not advance the session — it runs
+relative to the current position without consuming or producing a new
+state. Repeated queries are free.
 
 ---
 

@@ -95,26 +95,70 @@ If you didn't install with `pip install -e .`, point at the module instead:
 
 An example config lives at `examples/mcp_config.json`.
 
-## Skill (optional, recommended)
+## Claude Code plugin (optional, recommended)
 
-A Claude Code skill that teaches the agent how to drive this server is
-bundled under `skills/coqtail-mcp/`. It spells out the session lifecycle,
-position conventions, error envelope, and a set of workflow recipes.
+The repo also ships as a Claude Code plugin. Installing it gives you
+two things on top of the raw MCP server:
 
-To install it system-wide:
+1. The **skill** (`plugins/coqtail-mcp/skills/coqtail-mcp/`) — server
+   lifecycle, position conventions, error envelopes, proof-craft
+   recipes, subagent patterns.
+2. Four **named subagents** (`plugins/coqtail-mcp/agents/`) —
+   `proof-repair`, `admitted-filler-deep`, `axiom-auditor`,
+   `proof-golfer` — that the main agent will reach for spontaneously
+   when their use conditions match.
+
+| Subagent | Model | Use when |
+|----------|-------|----------|
+| `coqtail-mcp:proof-repair` | sonnet | A tactic / sentence fails to step (type mismatch, unification, missing reference, syntax, …). Two-stage budget. Outputs a unified diff. |
+| `coqtail-mcp:admitted-filler-deep` | opus | A stubborn `Admitted` resists 3+ candidate proofs, or needs a helper lemma / multi-step structuring. Plans before editing. |
+| `coqtail-mcp:axiom-auditor` | opus | Verify proof hygiene before a checkpoint. Two modes: `audit` (read-only) and `eliminate`. |
+| `coqtail-mcp:proof-golfer` | opus | Shorten / direct-ify proofs in a file that already type-checks end-to-end. |
+
+### Install as a plugin
+
+The repo doubles as a single-plugin Claude Code marketplace. Register
+it once, then install the plugin from it:
 
 ```bash
-ln -s "$(pwd)/skills/coqtail-mcp" ~/.claude/skills/coqtail-mcp
+claude plugin marketplace add /abs/path/to/Coqtail-mcp
+claude plugin install coqtail-mcp@coqtail-mcp
+```
+
+Claude Code copies the plugin into a versioned cache at install time,
+so edits in the source tree are not picked up automatically. After
+changing files in `plugins/coqtail-mcp/`, refresh the cache with:
+
+```bash
+claude plugin marketplace update coqtail-mcp
+claude plugin update coqtail-mcp@coqtail-mcp
+```
+
+(Or uninstall and re-install.) Restart Claude Code to pick up the new
+version.
+
+### Install just the skill (minimal setup)
+
+If you don't want the named subagents, you can link only the skill
+into your user-scope skills directory instead of installing the
+plugin:
+
+```bash
+ln -s "$(pwd)/plugins/coqtail-mcp/skills/coqtail-mcp" \
+      ~/.claude/skills/coqtail-mcp
 ```
 
 or project-locally (inside the repo the agent is working on):
 
 ```bash
-ln -s "/abs/path/to/Coqtail-mcp/skills/coqtail-mcp" \
+ln -s "/abs/path/to/Coqtail-mcp/plugins/coqtail-mcp/skills/coqtail-mcp" \
       .claude/skills/coqtail-mcp
 ```
 
-With the skill active, Claude will automatically follow server-specific
+Symlinks track the source tree live — no `claude plugin update`
+needed — but you don't get the four named subagents, only the skill.
+
+With either install, Claude will automatically follow server-specific
 guidance (e.g. "leave `coq_prog` blank on Rocq ≥ 8.9") without you
 having to prompt for it.
 
@@ -208,10 +252,21 @@ Coqtail-mcp/
 │   ├── mcp_config.json      # sample Claude Code config
 │   ├── AGENTS_CLAUDE.md     # shared agent instructions for Codex/Claude
 │   └── link-agent-docs.sh   # links AGENTS.md and CLAUDE.md into a project
-├── skills/
-│   └── coqtail-mcp/         # Claude Code skill for this server
-│       ├── SKILL.md
-│       └── references/
+├── .claude-plugin/
+│   └── marketplace.json     # marketplace manifest (single-plugin)
+├── plugins/
+│   └── coqtail-mcp/
+│       ├── .claude-plugin/
+│       │   └── plugin.json  # plugin manifest
+│       ├── skills/
+│       │   └── coqtail-mcp/ # Claude Code skill for this server
+│       │       ├── SKILL.md
+│       │       └── references/
+│       └── agents/          # four named subagents
+│           ├── proof-repair.md
+│           ├── admitted-filler-deep.md
+│           ├── axiom-auditor.md
+│           └── proof-golfer.md
 ├── pyproject.toml
 ├── LICENSE
 └── README.md
@@ -239,3 +294,14 @@ COQ_PATH=/home/you/.opam/my-switch/bin python -m pytest tests/
 The XML-protocol client is Coqtail
 ([whonore/Coqtail](https://github.com/whonore/Coqtail), MIT). See `LICENSE`
 for attribution.
+
+The Claude Code skill (`plugins/coqtail-mcp/skills/coqtail-mcp/`) and the
+four named subagents (`plugins/coqtail-mcp/agents/`) are adapted from
+[LLM4Rocq/rocq-skills](https://github.com/LLM4Rocq/rocq-skills)
+(Apache-2.0). The original is built around a different MCP server with
+parallel tactic testing and per-state backtracking; this fork retargets
+the same workflows at coqtail-mcp's serial, file-as-source-of-truth
+primitives (`rocq_step_to` + `reload_from_file` in place of `rocq_check`
++ `rocq_step_multi`, interactive `step_to(line=-1)` in place of
+`rocq_compile`) and renames the agents under the `coqtail-mcp:`
+namespace. See `LICENSE` for attribution.

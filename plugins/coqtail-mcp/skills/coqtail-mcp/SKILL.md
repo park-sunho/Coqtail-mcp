@@ -1,6 +1,6 @@
 ---
 name: coqtail-mcp
-description: "Drive a live Rocq/Coq proof session through the coqtail-mcp MCP server — start a session from a .v file, step forward/backward to any line, inspect the current goal and hypothesis context, and run read-only queries (Check, Print, Search). Trigger when the user wants to step through a Rocq proof interactively, inspect proof state at a specific buffer position, run non-advancing queries, or otherwise drive coqidetop from an agent. Do NOT trigger for Lean 4, Agda, Isabelle, HOL4, Mizar, Idris, or other non-Rocq provers. Complements (does not replace) any general Rocq skill: use this for server-specific mechanics — session lifecycle, position semantics, rewind boundaries, error envelopes — not for tactic selection or proof strategy."
+description: "Drive a live Rocq/Coq proof session through the coqtail-mcp MCP server — start a session from a .v file, step forward/backward to any line, inspect the current goal and hypothesis context, and run read-only queries (Check, Print, Search). Trigger when the user wants to step through a Rocq proof interactively, inspect proof state at a specific buffer position, run non-advancing queries, or otherwise drive coqidetop from an agent. Do NOT trigger for Lean 4, Agda, Isabelle, HOL4, Mizar, Idris, or other non-Rocq provers."
 ---
 
 # coqtail-mcp
@@ -10,9 +10,12 @@ which spawns `coqidetop` subprocesses and exposes a session-oriented view
 over Coqtail's XML protocol. Each session is one live Rocq process; you
 advance or rewind it by specifying buffer positions.
 
-If the user has a *general* Rocq skill already loaded, that one covers
-tactic selection, library search, axiom hygiene, etc. This skill is
-strictly about **driving this particular MCP server correctly**.
+The skill covers two things: (1) **driving the server correctly** —
+session lifecycle, position semantics, rewind boundaries, error
+envelopes — and (2) **using it well for actual proof work** — the
+search-first habit, tactic cascade, goal-pattern → tactic table,
+common-error fixes, axiom hygiene, and patterns for delegating
+parallel work to subagents.
 
 ## Tool summary
 
@@ -60,6 +63,40 @@ keeps a `coqidetop` subprocess alive.
   strictly after that boundary is popped via a single `Edit_at`.
 - `endpoint` in responses is 1-indexed `[line, col_after_dot]` (i.e. one
   past the terminator), or `null` if nothing has been executed.
+
+## Working principles
+
+These are not server-enforced — they are practitioner conventions that
+make the difference between using this server well and fighting it.
+
+1. **Search before you prove.** `rocq_query("Search ...")` /
+   `rocq_query("Check ...")` / `rocq_query("Print ...")` are free —
+   they don't consume state. Run at least one search before writing
+   any non-trivial tactic. The most common agent failure mode is
+   reproving a stdlib lemma from scratch.
+2. **Step, don't compile.** Inside the proof loop, prefer
+   `rocq_step_to(line=-1, reload_from_file=true)` over `coqc` /
+   `make` / `dune build`. Each external compile re-checks the entire
+   file from scratch; stepping only re-checks the diff. (See
+   `examples/AGENTS_CLAUDE.md` for the rationale; it's a project
+   convention, not a server limit.)
+3. **Goal-driven, not guess-driven.** Read `rocq_goals` before
+   choosing a tactic. The hypothesis list and conclusion shape almost
+   always determine the right move. See [proof-recipes.md § 4](references/proof-recipes.md#4-goal-pattern--tactic-mapping)
+   for a goal-pattern → tactic table.
+4. **The file is the source of truth.** There's no "send a sentence"
+   primitive. Tactics get tested by editing the `.v` file and asking
+   the server to reload (`reload_from_file=true`). One implication:
+   keep the file on disk in sync with what you want Rocq to see.
+5. **Don't change theorem statements.** Headers, signatures, and doc
+   comments are off-limits without explicit user approval. Same for
+   introducing new global `Axiom` / `Parameter` / `Conjecture` —
+   if a proof seems to need one, stop and ask.
+6. **80-char line width.** Standard Coq/Rocq formatting.
+
+For full proof-craft guidance (search-first protocol, tactic cascade,
+error-pattern fixes, axiom hygiene, completion criteria), read
+[references/proof-recipes.md](references/proof-recipes.md).
 
 ## Canonical workflows
 
@@ -262,6 +299,59 @@ against it.
    highlighting spans) are stripped from conclusions, hypotheses, query
    messages, and errors.
 
+8. **The file on disk is the unit of work — there is no "send a
+   sentence" primitive.** Tactics get tested by editing the `.v` file
+   and asking the server to reload it (`rocq_step_to(...,
+   reload_from_file=true)`). The server diffs the new buffer against
+   the in-memory one and rewinds the minimum needed to stay
+   consistent.
+   - **Run a tactic at line L** → edit the file, then
+     `rocq_step_to(line=L, reload_from_file=true)`.
+   - **Backtrack** → step to an earlier `(line, col)`. Rewinds are
+     position-based; `reload_from_file=true` handles diff-based
+     rewinds automatically.
+   - **Type-check the whole file interactively** →
+     `rocq_step_to(line=-1, reload_from_file=true)`. Inside the proof
+     loop this is preferred over `coqc` / `make` / `dune build`,
+     which re-check from scratch every time and are catastrophic for
+     tactic search. Reserve those for final/CI confirmation (see
+     `examples/AGENTS_CLAUDE.md`).
+   - **Verify a finished proof** → step to EOF, then
+     `rocq_query("Print Assumptions name.")` to confirm only standard
+     axioms are used.
+   - **Test N tactic candidates "in parallel"** → see [subagents.md](references/subagents.md);
+     each subagent owns its own session.
+
+## Quality gate
+
+A proof is complete (in this server) when **all** of the following
+hold:
+
+1. `rocq_step_to(session_id="...", line=-1, reload_from_file=true)`
+   returns `success: true` on the file as written. The session *is*
+   the type-checker — there's no separate compile step.
+2. No `Admitted` / `admit` remains in the agreed scope. (The server
+   doesn't track this; do a text scan with Grep.)
+3. `rocq_query("Print Assumptions theorem_name.")` lists only
+   standard axioms — namely:
+   - `classic`, `NNPP` (`Coq.Logic.Classical_Prop`)
+   - `functional_extensionality`
+     (`Coq.Logic.FunctionalExtensionality`)
+   - `propositional_extensionality`
+     (`Coq.Logic.PropExtensionality`)
+   - `proof_irrelevance` (`Coq.Logic.ProofIrrelevance`)
+   - `JMeq_eq` (`Coq.Logic.JMeq`)
+   - real-number axioms (`Coq.Reals.Rdefinitions` / `Raxioms`)
+
+   Anything else — especially project-local `Axiom` / `Parameter` /
+   `Conjecture` — should be surfaced to the user.
+4. No theorem / lemma statement was modified without explicit
+   approval.
+
+For final CI verification *outside* the interactive session, `coqc`
+or `make` / `dune build` is appropriate. Inside the loop, use
+`rocq_step_to` — see the working principles above.
+
 ## When this skill is NOT the right answer
 
 - **One-shot file compilation** (`coqc` is faster and simpler) — only
@@ -287,6 +377,16 @@ other tools.
 
 ## References
 
-- [tools](references/tools.md) — per-tool argument and response details
-- [workflows](references/workflows.md) — extended recipes beyond the
-  canonical examples above
+- [tools](references/tools.md) — per-tool argument and response
+  details (envelope shapes, optional fields, common failures)
+- [workflows](references/workflows.md) — extended tool-call recipes
+  beyond the canonical examples above (audit, bisect, iterate,
+  candidate testing, axiom audit, …)
+- [proof-recipes](references/proof-recipes.md) — proof-craft
+  guidance using only this server's primitives (search-first, tactic
+  cascade, goal-pattern table, error fixes, axiom hygiene,
+  completion criteria, house conventions)
+- [subagents](references/subagents.md) — when and how to delegate
+  to subagents to compensate for the server's serial primitives
+  (parallel candidate testing, background compilation, multi-file
+  audits, search delegation)
