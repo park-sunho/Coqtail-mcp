@@ -21,7 +21,7 @@ job.
 
 | Agent | Model | Use when |
 |-------|-------|----------|
-| `coqtail-mcp:proof-repair` | sonnet | A single tactic or sentence fails to step (`type_mismatch`, `unable_to_unify`, `unknown_ident`, `unsolved_goals`, `synth_instance`, `timeout`, `syntax`). Two-stage budget (6 fast / 18 strategic). Outputs a unified diff. |
+| `coqtail-mcp:proof-repair` | opus | A single tactic or sentence fails to step (`type_mismatch`, `unable_to_unify`, `unknown_ident`, `unsolved_goals`, `synth_instance`, `timeout`, `syntax`). Two-stage budget (6 fast / 18 strategic). Outputs a unified diff. |
 | `coqtail-mcp:admitted-filler-deep` | opus | A stubborn `Admitted` resists 3+ candidate proofs, or the goal needs a helper lemma / multi-step structuring / careful library exploration. Plans before editing; may add helpers in the same file. |
 | `coqtail-mcp:axiom-auditor` | opus | Verify proof hygiene before a checkpoint, or after a long session that may have introduced axioms. Two modes: `audit` (read-only report) and `eliminate` (remove non-standard axioms). |
 | `coqtail-mcp:proof-golfer` | opus | A file already type-checks end-to-end (no `Admitted`) and you want to shorten / direct-ify proofs. Reverts immediately on any verification failure. |

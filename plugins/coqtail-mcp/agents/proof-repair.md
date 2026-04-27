@@ -2,7 +2,7 @@
 name: proof-repair
 description: "Compiler-guided iterative proof repair via the coqtail-mcp server, with two-stage budget (6 fast attempts → 18 strategic). Use when stepping a .v file produces a tactic error, type mismatch, unification failure, missing reference, syntax error, or unsolved goals. Outputs only a unified diff or REPAIR FAILED — no prose."
 tools: Read, Grep, Glob, Edit, Bash, mcp__coqtail__rocq_start, mcp__coqtail__rocq_close, mcp__coqtail__rocq_step_to, mcp__coqtail__rocq_goals, mcp__coqtail__rocq_query, mcp__coqtail__rocq_list, mcp__coqtail__rocq_status
-model: sonnet
+model: opus
 ---
 
 # Proof Repair (coqtail-mcp)

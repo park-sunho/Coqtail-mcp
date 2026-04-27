@@ -110,7 +110,7 @@ two things on top of the raw MCP server:
 
 | Subagent | Model | Use when |
 |----------|-------|----------|
-| `coqtail-mcp:proof-repair` | sonnet | A tactic / sentence fails to step (type mismatch, unification, missing reference, syntax, …). Two-stage budget. Outputs a unified diff. |
+| `coqtail-mcp:proof-repair` | opus | A tactic / sentence fails to step (type mismatch, unification, missing reference, syntax, …). Two-stage budget. Outputs a unified diff. |
 | `coqtail-mcp:admitted-filler-deep` | opus | A stubborn `Admitted` resists 3+ candidate proofs, or needs a helper lemma / multi-step structuring. Plans before editing. |
 | `coqtail-mcp:axiom-auditor` | opus | Verify proof hygiene before a checkpoint. Two modes: `audit` (read-only) and `eliminate`. |
 | `coqtail-mcp:proof-golfer` | opus | Shorten / direct-ify proofs in a file that already type-checks end-to-end. |
