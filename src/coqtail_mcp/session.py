@@ -28,7 +28,7 @@ from .project import ProjectConfig, resolve_project_config
 
 import coqtop as CT  # type: ignore  # vendored
 import coqtail as CTAIL  # type: ignore  # vendored (for sentence helpers)
-from xmlInterface import Goals  # type: ignore  # vendored
+from xmlInterface import Goals, TIMEOUT_ERR  # type: ignore  # vendored
 
 
 class SessionError(RuntimeError):
@@ -51,6 +51,8 @@ class StepResult:
     error_range: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None
     # ^^ 1-indexed ((start_line, start_col), (end_line, end_col))
     stderr: str = ""
+    timed_out: bool = False
+    timeout_seconds: Optional[int] = None
 
 
 @dataclass
@@ -58,6 +60,8 @@ class QueryResult:
     success: bool
     message: str
     stderr: str = ""
+    timed_out: bool = False
+    timeout_seconds: Optional[int] = None
 
 
 class RocqSession:
@@ -219,6 +223,7 @@ class RocqSession:
         col: Optional[int] = None,
         *,
         admit: bool = False,
+        step_timeout: Optional[int] = None,
     ) -> StepResult:
         """Advance or rewind so everything up to ``(line, col)`` has executed.
 
@@ -227,6 +232,8 @@ class RocqSession:
         ``admit`` follows Coqtail's semantics: opaque proofs between
         ``Proof.`` and ``Qed.``/``Defined.`` are replaced with a single
         ``Admitted.`` on the fly.
+        ``step_timeout`` bounds each Rocq sentence independently; ``0`` or
+        ``None`` disables the timeout.
         """
         if not self._started:
             raise SessionError("session not started")
@@ -250,9 +257,19 @@ class RocqSession:
                     sentences_rewound=rewound,
                 )
 
-            return self._advance_to(target, admit=admit)
+            return self._advance_to(
+                target,
+                admit=admit,
+                step_timeout=step_timeout,
+            )
 
-    def _advance_to(self, target: Position, *, admit: bool) -> StepResult:
+    def _advance_to(
+        self,
+        target: Position,
+        *,
+        admit: bool,
+        step_timeout: Optional[int],
+    ) -> StepResult:
         to_send: List[Mapping[str, Position]] = []
         eline, ecol = self.endpoints[-1] if self.endpoints else (0, 0)
 
@@ -277,6 +294,7 @@ class RocqSession:
         all_stderr: List[str] = []
         err_text: Optional[str] = None
         err_range: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None
+        timed_out = False
         self.info_messages = []
 
         admit_up_to: Optional[Mapping[str, Position]] = None
@@ -306,7 +324,7 @@ class RocqSession:
                     message.decode("utf-8"),
                     no_comments.decode("utf-8"),
                     encoding="utf-8",
-                    timeout=None,
+                    timeout=step_timeout,
                     stderr_is_warning=self._stderr_is_warning,
                 )
             except CT.CoqtopError as e:
@@ -323,7 +341,15 @@ class RocqSession:
                 self.endpoints.append((line_, col_ + 1))
                 applied += 1
             else:
-                err_text = msg or "Rocq reported a failure with no message."
+                if msg == TIMEOUT_ERR.msg:
+                    timed_out = True
+                    err_text = _format_timeout_error(
+                        step_timeout,
+                        self._public_endpoint(),
+                        message,
+                    )
+                else:
+                    err_text = msg or "Rocq reported a failure with no message."
                 err_range = _derive_error_range(sentence, message, err_loc)
                 break
 
@@ -344,6 +370,8 @@ class RocqSession:
             error=err_text,
             error_range=err_range,
             stderr="\n".join(s for s in all_stderr if s),
+            timed_out=timed_out,
+            timeout_seconds=step_timeout if timed_out else None,
         )
 
     def _rewind_to(self, line: int, col: int) -> int:
@@ -390,7 +418,12 @@ class RocqSession:
             return goals, msg, stderr
 
     # ------------------------------------------------------------------- query
-    def query(self, cmd: str) -> QueryResult:
+    def query(
+        self,
+        cmd: str,
+        *,
+        query_timeout: Optional[int] = None,
+    ) -> QueryResult:
         if not self._started:
             raise SessionError("session not started")
         text = cmd.strip()
@@ -402,11 +435,19 @@ class RocqSession:
                     text,
                     in_script=False,
                     encoding="utf-8",
-                    timeout=None,
+                    timeout=query_timeout,
                     stderr_is_warning=self._stderr_is_warning,
                 )
             except CT.CoqtopError as e:
                 return QueryResult(success=False, message=str(e), stderr="")
+        if not ok and msg == TIMEOUT_ERR.msg:
+            return QueryResult(
+                success=False,
+                message=_format_query_timeout_error(query_timeout),
+                stderr=stderr,
+                timed_out=True,
+                timeout_seconds=query_timeout,
+            )
         return QueryResult(success=ok, message=msg, stderr=stderr)
 
     # ------------------------------------------------------------------ status
@@ -527,6 +568,60 @@ def _derive_error_range(
     sl, sc = CTAIL._pos_from_offset(scol, message, loc_s)
     el, ec = CTAIL._pos_from_offset(scol, message, loc_e)
     return ((sline + sl + 1, sc + 1), (sline + el + 1, ec + 1))
+
+
+def _format_timeout_error(
+    step_timeout: Optional[int],
+    endpoint: Optional[Tuple[int, int]],
+    timed_out_sentence: bytes = b"",
+) -> str:
+    duration = _format_duration(step_timeout)
+
+    if endpoint is None:
+        position = "before the first executed sentence"
+    else:
+        line, col = endpoint
+        position = f"at line {line}, col {col}"
+
+    guidance = (
+        "Retry the same rocq_step_to call to check whether the endpoint "
+        "advances; if it stays fixed, inspect the next sentence for a "
+        "non-terminating tactic or retry with a larger step_timeout."
+    )
+    if _looks_like_proof_closer(timed_out_sentence):
+        guidance = (
+            "The timed-out sentence appears to close a proof, which can be "
+            "naturally expensive because Rocq checks the completed proof term. "
+            "Retry with a larger step_timeout, or use step_timeout=0 if you "
+            "expect this Qed/Defined/Admitted to finish and want no timeout."
+        )
+
+    return (
+        f"rocq_step_to intentionally stopped after {duration} without a "
+        f"Rocq response. The current endpoint is {position}. {guidance}"
+    )
+
+
+def _format_query_timeout_error(query_timeout: Optional[int]) -> str:
+    return (
+        f"rocq_query intentionally stopped after {_format_duration(query_timeout)} "
+        "without a Rocq response. Queries do not advance the session state. "
+        "Retry with a larger query_timeout, use query_timeout=0 to disable the "
+        "timeout, or narrow the query if it is a broad Search/Compute."
+    )
+
+
+def _format_duration(timeout: Optional[int]) -> str:
+    if timeout is None or timeout == 0:
+        return "the configured timeout"
+    if timeout == 1:
+        return "1 second"
+    return f"{timeout} seconds"
+
+
+def _looks_like_proof_closer(sentence: bytes) -> bool:
+    no_comments, _ = CTAIL._strip_comments(sentence)
+    return no_comments.strip().startswith((b"Qed.", b"Defined.", b"Admitted."))
 
 
 def _diff_lines(

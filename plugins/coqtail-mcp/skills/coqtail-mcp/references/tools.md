@@ -98,6 +98,7 @@ admitted proofs triggered by `admit=true`).
 | `col`              | int    | no       | 1-indexed. Defaults to end-of-line (inclusive of any terminator on that line). |
 | `reload_from_file` | bool   | no       | Default `false`. When `true`, the server re-reads the `file_path` supplied to `rocq_start` and replaces the buffer before stepping. Only the sentences affected by the diff are rewound. Fails when the session was opened with inline `content` or when the file no longer exists. |
 | `admit`            | bool   | no       | Default `false`. When `true`, opaque proofs (`Qed.`/`Admitted.`) encountered during the advance are replaced with `Admitted.`. |
+| `step_timeout`     | int    | no       | Per-sentence timeout in seconds. Default `30` or `$COQTAIL_MCP_STEP_TIMEOUT`; pass `0` to disable. This is not a whole-batch timeout. |
 
 **Returns**
 
@@ -112,6 +113,13 @@ admitted proofs triggered by `admit=true`).
 - `success` is `false` if Rocq rejected a sentence. `endpoint` still
   reflects the last **successful** position; the session is fully
   consistent with that state.
+- On timeout, `success` is `false`, `timed_out` is `true`, and
+  `timeout_seconds` reports the per-sentence limit that fired. The endpoint
+  is the current cursor position. Retry the same `rocq_step_to` call to
+  test progress: if the endpoint advances, continue; if it stays fixed,
+  inspect the next sentence for a loop or rerun with a larger `step_timeout`.
+  If the timed-out sentence is `Qed.`, `Defined.`, or `Admitted.`, prefer a
+  larger timeout or `step_timeout=0`; proof closing often takes a long time.
 - On failure, `error` contains Rocq's message and `error_range` is 1-indexed
   `[[start_line, start_col], [end_line, end_col]]`.
 - `stderr` is included only when non-empty.
@@ -131,6 +139,8 @@ admitted proofs triggered by `admit=true`).
 
 - `session not started` — you skipped `rocq_start`
 - `line must be -1 (EOF) or >= 1` / `col must be >= 1` — invalid position
+- `step_timeout must be a non-negative integer` — pass seconds as an integer,
+  with `0` meaning disabled
 
 These rejected tool calls return `{ "ok": false, "error": "..." }`.
 
@@ -200,6 +210,7 @@ Run a query that does not change the proof state.
 | `query`      | string | yes      | A `Check …`, `Print …`, `Search …`, `About …`, `Locate …`, `Compute …`, etc. The trailing `.` is added if missing. |
 | `max_chars`  | int    | no       | Positive integer. Caps every emitted string value independently to at most this many characters. Truncated strings end with `...`, included inside the limit. |
 | `full_output_file` | string | no | File path. Writes the complete tool payload as UTF-8 JSON before `max_chars` is applied. |
+| `query_timeout` | int | no | Per-query timeout in seconds. Default `30` or `$COQTAIL_MCP_QUERY_TIMEOUT`; pass `0` to disable. |
 
 **Returns**
 
@@ -214,6 +225,10 @@ Run a query that does not change the proof state.
 When Rocq rejects the query (e.g. unknown identifier), `success` is
 `false` and `message` contains Rocq's error text. `stderr` is included only
 when non-empty.
+On timeout, `success` is `false`, `timed_out` is `true`, and
+`timeout_seconds` reports the limit that fired. Queries do not advance state;
+retry with a larger `query_timeout`, use `query_timeout=0`, or narrow broad
+queries such as `Search` / `Compute`.
 `max_chars=N` applies separately to `message` and `stderr`.
 `full_output_file=PATH` writes the complete JSON tool payload to `PATH`
 before `max_chars` is applied. The in-band response still honors `max_chars`
@@ -222,6 +237,11 @@ and includes `full_output_written_to` with the resolved side-file path.
 **Important**: `rocq_query` does not advance the session — it runs
 relative to the current position without consuming or producing a new
 state. Repeated queries are free.
+
+**Common failures at the envelope level**
+
+- `query_timeout must be a non-negative integer` — pass seconds as an integer,
+  with `0` meaning disabled.
 
 ---
 

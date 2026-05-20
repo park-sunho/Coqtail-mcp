@@ -167,6 +167,8 @@ most common Rocq error families.
 | `Cannot guess decreasing argument`                          | Non-structural recursion    | `{struct n}`, `Function`, `Program Fixpoint {measure ...}`    |
 | `Universe inconsistency`                                    | Universe levels collide     | `Set Universe Polymorphism.`; explicit `Type@{u}`             |
 | `Tactic failure: ... (level N)`                             | Tactic didn't apply         | Pick a different tactic; check goal with `rocq_goals` first   |
+| `timed_out: true` on `rocq_step_to`                         | Slow or looping sentence    | Retry once; if endpoint stays fixed, simplify or raise `step_timeout`; for `Qed.`, prefer a larger timeout |
+| `timed_out: true` on `rocq_query`                           | Broad or expensive query    | Narrow the query, raise `query_timeout`, or use `query_timeout=0`      |
 | `The command has not enough arguments` / `unexpected token` | Syntax error nearby         | Check 5–10 lines *before* `error_range` for missing `.`       |
 | `Found no subterm matching X in the current goal`           | `rewrite` target absent     | `rewrite ... in H.` / `rewrite ... at N.` / unfold first      |
 
@@ -187,6 +189,12 @@ at the *next* sentence (when the previous one is missing its closing
 endpoint after a failure reflects the last successful sentence — the
 state is consistent with that endpoint, so `rocq_goals` /
 `rocq_query` continue to work for diagnosis.
+When `timed_out: true`, the endpoint is also the progress marker. Retry the
+same step target once; endpoint movement means the file is still making
+progress, while a fixed endpoint points to the next sentence as the likely
+loop or expensive tactic. If the next sentence is `Qed.`, `Defined.`, or
+`Admitted.`, treat a timeout as likely expensive proof checking first; try a
+larger `step_timeout` or `step_timeout=0`.
 
 ---
 

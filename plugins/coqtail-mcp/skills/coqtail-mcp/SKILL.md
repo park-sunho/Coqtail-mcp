@@ -194,8 +194,12 @@ The MCP tools intentionally return small envelopes:
 
 - `rocq_start`: `ok`, `session_id`, `startup_stderr`
 - `rocq_step_to`: `ok`, `success`, `endpoint`, `error`, `error_range`, `stderr`
+- `rocq_step_to` timeout fields: `timed_out`, `timeout_seconds` when a
+  per-sentence `step_timeout` fires
 - `rocq_goals`: `ok`, `summary`, `stderr`, `full_output_written_to`
 - `rocq_query`: `ok`, `success`, `message`, `stderr`, `full_output_written_to`
+- `rocq_query` timeout fields: `timed_out`, `timeout_seconds` when
+  `query_timeout` fires
 - `rocq_status`: `ok`, `started`
 - Rejected tool calls: `ok`, `error`
 
@@ -242,6 +246,20 @@ range in the buffer (1-indexed `[[sl, sc], [el, ec]]`). Do not retry
 blindly; inspect `error` and adjust the buffer or tactic before calling
 `rocq_step_to` again.
 
+If `timed_out: true` on `rocq_step_to`, the server intentionally interrupted
+the current Rocq sentence after `step_timeout` seconds. The endpoint is the
+current cursor position. Retry the same `rocq_step_to` call once to test
+progress; if the endpoint advances, continue, and if it stays fixed, inspect
+the next sentence for a non-terminating tactic or rerun with a larger
+`step_timeout`. If the timed-out sentence is `Qed.`, `Defined.`, or
+`Admitted.`, prefer a larger timeout or `step_timeout=0`; proof closing often
+takes a long time and is less likely to be an infinite tactic loop.
+
+If `timed_out: true` on `rocq_query`, the query was interrupted after
+`query_timeout` seconds. Queries do not advance state. Retry with a larger
+`query_timeout`, use `query_timeout=0`, or narrow broad queries such as
+`Search` / `Compute`.
+
 ```
 { ok: true, success: false,
   error: "The reference foo was not found in the current environment.",
@@ -262,29 +280,39 @@ against it.
    versions. Pass `coq_prog` only if you know the binary name differs.
    `init_timeout` (default 60s) protects against that mistake.
 
-2. **`file_path` must be absolute and must exist** — the server refuses
+2. **`step_timeout` is per sentence, not per file.** The default is 30s
+   or `$COQTAIL_MCP_STEP_TIMEOUT`; pass `step_timeout=0` to disable. A
+   timeout returns `timed_out: true` with the last successful `endpoint`.
+   If this happens at `Qed.`, `Defined.`, or `Admitted.`, try a larger
+   timeout before treating it as a loop.
+
+3. **`query_timeout` is per query.** The default is 30s or
+   `$COQTAIL_MCP_QUERY_TIMEOUT`; pass `query_timeout=0` to disable. Query
+   timeouts do not change the session state.
+
+4. **`file_path` must be absolute and must exist** — the server refuses
    relative paths (they can be ambiguous in an MCP client whose CWD is
    not the user's working directory). If you only have a relative path,
    resolve it first with Read/LS or pass `content` directly.
 
-3. **Provide `file_path` OR `content`, not both.** Rocq uses the path
+5. **Provide `file_path` OR `content`, not both.** Rocq uses the path
    only to set the top-module name via `-topfile`; it does not re-read
    the file from disk. If you pass `content`, the server writes it to
    an internal buffer and makes up a safe module name.
 
-4. **One session per file (and per Rocq process).** Reusing a
+6. **One session per file (and per Rocq process).** Reusing a
    `session_id` across files gives you Rocq state that thinks it's
    inside the first file's module. Open a fresh session for a different
    `.v` file.
 
-5. **The session's buffer is independent from the agent's Read cache.**
+7. **The session's buffer is independent from the agent's Read cache.**
    After you edit a file on disk with Edit/Write, subsequent
    `rocq_step_to` calls still see the buffer the server loaded. Pass
    `reload_from_file=true` on `rocq_step_to` (or open a new session) to
    push changes. `reload_from_file` only works when the session was
    started with `file_path`; inline-content sessions must be reopened.
 
-6. **Project settings are auto-detected for `file_path` sessions.**
+8. **Project settings are auto-detected for `file_path` sessions.**
    The default `build_system="prefer-coqproject"` uses `_CoqProject`
    or `_RocqProject` files when found, otherwise it falls back to Dune.
    Project-file search first checks `.` and `./theories` relative to
@@ -295,11 +323,11 @@ against it.
    Use `build_system="prefer-dune"`, `"dune"`, or `"coqproject"` to
    control precedence. Pass `extra_args` for final overrides.
 
-7. **Rocq output strings are plain text.** Richpp tags (syntax
+9. **Rocq output strings are plain text.** Richpp tags (syntax
    highlighting spans) are stripped from conclusions, hypotheses, query
    messages, and errors.
 
-8. **The file on disk is the unit of work — there is no "send a
+10. **The file on disk is the unit of work — there is no "send a
    sentence" primitive.** Tactics get tested by editing the `.v` file
    and asking the server to reload it (`rocq_step_to(...,
    reload_from_file=true)`). The server diffs the new buffer against

@@ -36,7 +36,7 @@ from coqtail_mcp.formatting import (  # noqa: E402
     summarize_goals,
     truncate_strings,
 )
-from xmlInterface import Goal, Goals  # noqa: E402
+from xmlInterface import Goal, Goals, TIMEOUT_ERR  # noqa: E402
 
 
 # ------------------------------------------------------------------ offline
@@ -211,6 +211,217 @@ def test_offline_server_ok_false_error_is_compact() -> None:
     assert len(result["error"]) == 300
     assert "\n" not in result["error"]
     assert result["error"].endswith("...")
+
+
+def test_offline_server_rejects_invalid_step_timeout() -> None:
+    from coqtail_mcp import server as srv
+
+    result = srv.rocq_step_to(
+        session_id="missing",
+        line=1,
+        step_timeout=-1,
+    )
+
+    assert result["ok"] is False
+    assert "step_timeout" in result["error"]
+
+
+def test_offline_server_rejects_invalid_query_timeout() -> None:
+    from coqtail_mcp import server as srv
+
+    result = srv.rocq_query(
+        session_id="missing",
+        query="Check nat",
+        query_timeout=-1,
+    )
+
+    assert result["ok"] is False
+    assert "query_timeout" in result["error"]
+
+
+def test_offline_server_step_timeout_default_is_configurable(monkeypatch) -> None:
+    from coqtail_mcp import server as srv
+
+    monkeypatch.delenv(srv.STEP_TIMEOUT_ENV, raising=False)
+    assert srv._resolve_step_timeout(None) == srv.DEFAULT_STEP_TIMEOUT_SECONDS
+
+    monkeypatch.setenv(srv.STEP_TIMEOUT_ENV, "9")
+    assert srv._resolve_step_timeout(None) == 9
+    assert srv._resolve_step_timeout(4) == 4
+
+
+def test_offline_server_query_timeout_default_is_configurable(monkeypatch) -> None:
+    from coqtail_mcp import server as srv
+
+    monkeypatch.delenv(srv.QUERY_TIMEOUT_ENV, raising=False)
+    assert srv._resolve_query_timeout(None) == srv.DEFAULT_QUERY_TIMEOUT_SECONDS
+
+    monkeypatch.setenv(srv.QUERY_TIMEOUT_ENV, "11")
+    assert srv._resolve_query_timeout(None) == 11
+    assert srv._resolve_query_timeout(5) == 5
+
+
+def test_offline_server_omits_empty_timeout_fields() -> None:
+    from coqtail_mcp import server as srv
+
+    result = srv._omit_empty_fields(
+        {
+            "ok": True,
+            "success": True,
+            "endpoint": (1, 18),
+            "timed_out": None,
+            "timeout_seconds": None,
+        }
+    )
+
+    assert result == {"ok": True, "success": True, "endpoint": (1, 18)}
+
+
+def test_offline_query_timeout_reports_non_state_changing_timeout() -> None:
+    reg = SessionRegistry()
+    s = reg.create(session_id="query-timeout", content="")
+    s._started = True
+    calls: list[tuple[str, int | None]] = []
+
+    def fake_dispatch(
+        cmd: str,
+        *,
+        in_script: bool,
+        encoding: str,
+        timeout: int | None,
+        stderr_is_warning: bool,
+    ):
+        del encoding, stderr_is_warning
+        calls.append((cmd, timeout))
+        assert in_script is False
+        return False, TIMEOUT_ERR.msg, TIMEOUT_ERR.loc, ""
+
+    s._coqtop.dispatch = fake_dispatch  # type: ignore[method-assign]
+
+    result = s.query("Search nat", query_timeout=6)
+
+    assert result.success is False
+    assert result.timed_out is True
+    assert result.timeout_seconds == 6
+    assert "rocq_query intentionally stopped after 6 seconds" in result.message
+    assert "Queries do not advance" in result.message
+    assert calls == [("Search nat.", 6)]
+
+
+def test_offline_server_query_timeout_response(monkeypatch) -> None:
+    from coqtail_mcp import server as srv
+
+    reg = SessionRegistry()
+    s = reg.create(session_id="server-query-timeout", content="")
+    s._started = True
+    monkeypatch.setattr(srv, "_registry", reg)
+
+    def fake_dispatch(
+        cmd: str,
+        *,
+        in_script: bool,
+        encoding: str,
+        timeout: int | None,
+        stderr_is_warning: bool,
+    ):
+        del cmd, in_script, encoding, timeout, stderr_is_warning
+        return False, TIMEOUT_ERR.msg, TIMEOUT_ERR.loc, ""
+
+    s._coqtop.dispatch = fake_dispatch  # type: ignore[method-assign]
+
+    result = srv.rocq_query(
+        session_id="server-query-timeout",
+        query="Search nat",
+        query_timeout=8,
+    )
+
+    assert result["ok"] is True
+    assert result["success"] is False
+    assert result["timed_out"] is True
+    assert result["timeout_seconds"] == 8
+    assert "rocq_query intentionally stopped after 8 seconds" in result["message"]
+
+
+def test_offline_step_to_timeout_reports_partial_progress() -> None:
+    reg = SessionRegistry()
+    s = reg.create(
+        session_id="timeout",
+        content=(
+            "Definition a := 0.\n"
+            "Definition b := 1.\n"
+            "Definition c := 2.\n"
+        ),
+    )
+    s._started = True
+    calls: list[tuple[str, int | None]] = []
+
+    def fake_dispatch(
+        cmd: str,
+        _cmd_no_comment: str,
+        *,
+        encoding: str,
+        timeout: int | None,
+        stderr_is_warning: bool,
+    ):
+        del encoding, stderr_is_warning
+        calls.append((cmd, timeout))
+        if "Definition b" in cmd:
+            return False, TIMEOUT_ERR.msg, TIMEOUT_ERR.loc, ""
+        return True, "", None, ""
+
+    s._coqtop.dispatch = fake_dispatch  # type: ignore[method-assign]
+
+    result = s.step_to(line=-1, step_timeout=7)
+
+    assert result.success is False
+    assert result.timed_out is True
+    assert result.timeout_seconds == 7
+    assert result.sentences_applied == 1
+    assert result.endpoint == (1, 18)
+    assert result.error_range == ((1, 19), (2, 18))
+    assert "intentionally stopped after 7 seconds" in (result.error or "")
+    assert "line 1, col 18" in (result.error or "")
+    assert "endpoint advances" in (result.error or "")
+    assert calls == [
+        ("Definition a := 0.", 7),
+        ("\nDefinition b := 1.", 7),
+    ]
+
+
+def test_offline_step_to_timeout_on_qed_suggests_larger_timeout() -> None:
+    reg = SessionRegistry()
+    s = reg.create(
+        session_id="qed-timeout",
+        content=(
+            "Theorem t : True.\n"
+            "Proof.\n"
+            "  exact I.\n"
+            "Qed.\n"
+        ),
+    )
+    s._started = True
+
+    def fake_dispatch(
+        cmd: str,
+        _cmd_no_comment: str,
+        *,
+        encoding: str,
+        timeout: int | None,
+        stderr_is_warning: bool,
+    ):
+        del encoding, timeout, stderr_is_warning
+        if "Qed" in cmd:
+            return False, TIMEOUT_ERR.msg, TIMEOUT_ERR.loc, ""
+        return True, "", None, ""
+
+    s._coqtop.dispatch = fake_dispatch  # type: ignore[method-assign]
+
+    result = s.step_to(line=-1, step_timeout=7)
+
+    assert result.success is False
+    assert result.timed_out is True
+    assert "appears to close a proof" in (result.error or "")
+    assert "step_timeout=0" in (result.error or "")
 
 
 # -------------------------------------------------------------------- live

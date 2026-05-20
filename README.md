@@ -29,9 +29,9 @@ already work. This project only adds:
 |------|--------------|
 | `rocq_start`   | Spawn a `coqidetop` subprocess. Accepts either `file_path` or inline `content`. Returns the session id and startup stderr. |
 | `rocq_close`   | Terminate a session's subprocess and forget it. |
-| `rocq_step_to` | Advance or rewind so the session's state matches `(line, col)`. Optionally re-reads the original `file_path` from disk (`reload_from_file`) and/or admits opaque proofs (`admit`). |
+| `rocq_step_to` | Advance or rewind so the session's state matches `(line, col)`. Optionally re-reads the original `file_path` from disk (`reload_from_file`), admits opaque proofs (`admit`), and caps each Rocq sentence with `step_timeout`. |
 | `rocq_goals`   | Return the current proof goal and hypothesis context as a structured summary. Accepts optional `range`, `max_chars`, and `full_output_file` controls for large contexts. |
-| `rocq_query`   | Run a non-state-changing query (`Check`, `Print`, `Search`, …). Accepts optional `max_chars` and `full_output_file` controls for large output. |
+| `rocq_query`   | Run a non-state-changing query (`Check`, `Print`, `Search`, …). Accepts optional `max_chars`, `full_output_file`, and `query_timeout` controls. |
 | `rocq_status`  | Report whether one session is started. |
 | `rocq_list`    | List active session ids. |
 
@@ -194,11 +194,17 @@ rocq_goals(session_id="demo", range=[-5, -1], max_chars=500,
 # → response stays capped/ranged, while the file receives the full JSON
 #   tool payload before range/max_chars are applied.
 
+rocq_step_to(session_id="demo", line=-1, step_timeout=60)
+# → each individual Rocq sentence may run for up to 60 seconds.
+
 rocq_query(session_id="demo", query="Check nat")
 # → { ok: true, success: true, message: "nat : Set" }
 
 rocq_query(session_id="demo", query="Search (_ + 0 = _).", max_chars=1000)
 # → message is capped at 1000 characters.
+
+rocq_query(session_id="demo", query="Search (_ + 0 = _).", query_timeout=60)
+# → the query may run for up to 60 seconds.
 
 rocq_query(session_id="demo", query="Search (_ + 0 = _).", max_chars=1000,
            full_output_file="/tmp/demo-query.json")
@@ -213,6 +219,21 @@ Optional response fields such as `startup_stderr`, `stderr`, `error`, and
 omitted for unnamed goals.
 If a tool call itself is rejected, the response includes `{ ok: false }` plus
 a brief `error` string with the reason.
+For `rocq_step_to`, `step_timeout` is a per-sentence progress timeout, not a
+whole-file timeout. The default is 30 seconds, configurable globally with the
+`COQTAIL_MCP_STEP_TIMEOUT` environment variable or per call with
+`step_timeout`; pass `0` to disable it. If the timeout fires, the server sends
+Rocq an interrupt and returns `ok: true`, `success: false`,
+`timed_out: true`, the `timeout_seconds` used, and the current `endpoint`.
+Retry the same `rocq_step_to` call to check for progress: if the endpoint
+advances, continue; if it stays fixed, inspect the next sentence or use a
+larger `step_timeout`. If the timed-out sentence is `Qed.`, `Defined.`, or
+`Admitted.`, prefer a larger timeout or `step_timeout=0`; proof closing often
+takes a long time and is less likely to be an infinite tactic loop.
+For `rocq_query`, `query_timeout` caps one query. The default is 30 seconds,
+configurable globally with `COQTAIL_MCP_QUERY_TIMEOUT` or per call with
+`query_timeout`; pass `0` to disable it. A query timeout returns
+`timed_out: true` and does not advance the session state.
 For `rocq_goals` and `rocq_query`, `max_chars` is a positive integer that caps
 each emitted string value independently. Truncated strings end with `...`,
 with the suffix included inside the character limit.
