@@ -12,10 +12,14 @@ Run with::
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import os
+import queue
 import shutil
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -424,6 +428,330 @@ def test_offline_step_to_timeout_on_qed_suggests_larger_timeout() -> None:
     assert "step_timeout=0" in (result.error or "")
 
 
+def test_offline_capture_out_stops_at_stdout_eof() -> None:
+    """The reader thread must not spin forever after the backend exits."""
+    from coqtail_mcp.session import CT
+
+    allow_second_read = threading.Event()
+
+    class EOFStream(io.BytesIO):
+        def __init__(self) -> None:
+            super().__init__(b"")
+            self.read_count = 0
+
+        def read(self, size: int = -1) -> bytes:
+            self.read_count += 1
+            if self.read_count > 1:
+                allow_second_read.wait(timeout=1)
+            return super().read(size)
+
+    coqtop = CT.Coqtop()
+    stream = EOFStream()
+    reader = threading.Thread(
+        target=coqtop.capture_out,
+        args=(coqtop.out_q, stream),
+        daemon=True,
+    )
+    reader.start()
+    reader.join(timeout=1)
+    stopped_at_eof = not reader.is_alive()
+
+    # Let the buggy implementation escape its second read before asserting,
+    # so a failing test does not leave a hot background thread behind.
+    coqtop.stopping = True
+    allow_second_read.set()
+    reader.join(timeout=1)
+
+    assert stopped_at_eof
+    assert stream.read_count == 1
+
+
+def test_offline_get_answer_detects_dead_backend() -> None:
+    """A dead process must release dispatch rather than retain the session lock."""
+    from coqtail_mcp.session import CT
+
+    release = threading.Event()
+
+    class DeadProcess:
+        @staticmethod
+        def poll() -> int:
+            return 1
+
+    class FakeXml:
+        warnings_wf = True
+
+    class ControlledQueue:
+        @staticmethod
+        def empty() -> bool:
+            return True
+
+        @staticmethod
+        def get(timeout: float) -> bytes:
+            del timeout
+            if release.wait(timeout=0.05):
+                raise RuntimeError("test cleanup")
+            raise queue.Empty
+
+    coqtop = CT.Coqtop()
+    coqtop.coqtop = DeadProcess()
+    coqtop.xml = FakeXml()
+    coqtop.out_q = ControlledQueue()
+    outcome: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            coqtop.get_answer()
+        except BaseException as exc:  # noqa: BLE001 - assertion captures type
+            outcome.append(exc)
+
+    waiter = threading.Thread(target=run, daemon=True)
+    waiter.start()
+    waiter.join(timeout=1)
+    returned_after_death = not waiter.is_alive()
+    release.set()
+    waiter.join(timeout=1)
+
+    assert returned_after_death
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], CT.CoqtopError)
+
+
+def test_offline_mcp_cancel_busy_step_keeps_server_responsive(monkeypatch) -> None:
+    """A busy Rocq worker must not block list or cancellation handling."""
+    from coqtail_mcp import server as srv
+
+    class BlockingSession:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.aborted = threading.Event()
+            self.finished = threading.Event()
+
+        def step_to(self, *_args, **_kwargs):
+            try:
+                self.started.set()
+                self.release.wait(timeout=2)
+                raise SessionError("aborted")
+            finally:
+                self.finished.set()
+
+        def abort(self) -> None:
+            self.aborted.set()
+            self.release.set()
+
+    class FakeRegistry:
+        def __init__(self, session: BlockingSession) -> None:
+            self.sessions = {"busy": session}
+
+        def get(self, session_id: str):
+            return self.sessions[session_id]
+
+        def drop(self, session_id: str):
+            session = self.sessions.pop(session_id, None)
+            if session is None:
+                raise SessionError(f"no such session: {session_id!r}")
+            return session
+
+        def list_ids(self):
+            return list(self.sessions)
+
+    session = BlockingSession()
+    monkeypatch.setattr(srv, "_registry", FakeRegistry(session))
+
+    async def scenario() -> None:
+        step = asyncio.create_task(
+            srv.mcp.call_tool(
+                "rocq_step_to",
+                {"session_id": "busy", "line": 1, "step_timeout": 0},
+            )
+        )
+        assert await asyncio.to_thread(session.started.wait, 2)
+
+        _content, structured = await asyncio.wait_for(
+            srv.mcp.call_tool("rocq_list", {}),
+            timeout=1,
+        )
+        assert structured["result"]["session_ids"] == ["busy"]
+
+        step.cancel()
+        try:
+            await step
+        except asyncio.CancelledError:
+            pass
+
+        assert session.aborted.wait(timeout=1)
+        assert session.finished.wait(timeout=1)
+        _content, structured = await asyncio.wait_for(
+            srv.mcp.call_tool("rocq_list", {}),
+            timeout=1,
+        )
+        assert structured["result"]["session_ids"] == []
+
+    asyncio.run(scenario())
+
+
+def test_offline_session_close_aborts_before_waiting_for_traffic_lock() -> None:
+    session = RocqSession("close-busy", content="")
+    session._started = True
+    lock_held = threading.Event()
+    backend_aborted = threading.Event()
+    release_lock = threading.Event()
+
+    class FakeCoqtop:
+        @staticmethod
+        def abort() -> None:
+            backend_aborted.set()
+            release_lock.set()
+
+        @staticmethod
+        def stop() -> None:
+            pass
+
+    session._coqtop = FakeCoqtop()
+
+    def hold_traffic_lock() -> None:
+        with session._lock:
+            lock_held.set()
+            release_lock.wait(timeout=1)
+
+    holder = threading.Thread(target=hold_traffic_lock, daemon=True)
+    holder.start()
+    assert lock_held.wait(timeout=1)
+
+    closer = threading.Thread(target=session.close, daemon=True)
+    closer.start()
+    closer.join(timeout=1)
+
+    assert backend_aborted.is_set()
+    assert not closer.is_alive()
+    holder.join(timeout=1)
+
+
+def test_offline_coqtop_timeout_returns_after_successful_interrupt() -> None:
+    """A responsive interrupt reports a timeout without killing the backend."""
+    from coqtail_mcp.session import CT
+
+    release = threading.Event()
+    interrupted = threading.Event()
+    killed = threading.Event()
+
+    class AliveProcess:
+        @staticmethod
+        def poll():
+            return None
+
+        @staticmethod
+        def kill() -> None:
+            killed.set()
+
+    class FakeXml:
+        @staticmethod
+        def standardize(_cmd, response):
+            return response
+
+    coqtop = CT.Coqtop()
+    coqtop.coqtop = AliveProcess()
+    coqtop.xml = FakeXml()
+    coqtop.empty_out = lambda: None
+    coqtop.send_cmd = lambda _msg: None
+
+    def interrupt() -> None:
+        interrupted.set()
+        release.set()
+
+    coqtop.interrupt = interrupt
+    coqtop.get_answer = lambda _stderr=False: (
+        release.wait(timeout=1) and (object(), "")
+    )
+
+    response, stderr = coqtop.call(("Fake", b"<fake/>"), timeout=0.05)
+
+    assert response is TIMEOUT_ERR
+    assert stderr == ""
+    assert interrupted.is_set()
+    assert not killed.is_set()
+
+
+def test_offline_coqtop_timeout_force_aborts_unresponsive_reader(monkeypatch) -> None:
+    """The interrupt grace period is a hard bound, not an executor wait."""
+    import time
+
+    from coqtail_mcp.session import CT
+
+    release = threading.Event()
+    interrupted = threading.Event()
+    killed = threading.Event()
+
+    class UnresponsiveProcess:
+        @staticmethod
+        def poll():
+            return None
+
+        @staticmethod
+        def kill() -> None:
+            killed.set()
+            release.set()
+
+    class FakeXml:
+        @staticmethod
+        def standardize(_cmd, response):
+            return response
+
+    coqtop = CT.Coqtop()
+    coqtop.coqtop = UnresponsiveProcess()
+    coqtop.xml = FakeXml()
+    coqtop.empty_out = lambda: None
+    coqtop.send_cmd = lambda _msg: None
+    coqtop.interrupt = interrupted.set
+    coqtop.get_answer = lambda _stderr=False: (
+        release.wait(timeout=1) and (object(), "")
+    )
+    monkeypatch.setattr(CT, "INTERRUPT_GRACE_SECONDS", 0.05)
+
+    started = time.monotonic()
+    with pytest.raises(CT.CoqtopError, match="terminated"):
+        coqtop.call(("Fake", b"<fake/>"), timeout=0.05)
+    elapsed = time.monotonic() - started
+
+    assert interrupted.is_set()
+    assert killed.is_set()
+    assert elapsed < 1
+
+
+@pytest.mark.parametrize("operation", ["step", "query", "goals", "rewind"])
+def test_offline_transport_error_marks_session_stopped(operation: str) -> None:
+    """A fatal backend error must not leave a racy started status behind."""
+    from coqtail_mcp.session import CT
+
+    session = RocqSession("transport-error", content="Check nat.")
+    session._started = True
+
+    def fail_dispatch(*_args, **_kwargs):
+        raise CT.CoqtopError("backend terminated")
+
+    session._coqtop.running = lambda: True
+
+    if operation in {"step", "query"}:
+        session._coqtop.dispatch = fail_dispatch
+        result = (
+            session.step_to(line=-1)
+            if operation == "step"
+            else session.query("Check nat")
+        )
+        assert result.success is False
+    elif operation == "goals":
+        session._coqtop.goals = fail_dispatch
+        with pytest.raises(CT.CoqtopError, match="terminated"):
+            session.goals_text()
+    else:
+        session.endpoints = [(0, 10)]
+        session._coqtop.rewind = fail_dispatch
+        with pytest.raises(CT.CoqtopError, match="terminated"):
+            session.step_to(line=1, col=1)
+
+    assert session.status()["started"] is False
+
+
 # -------------------------------------------------------------------- live
 
 
@@ -580,6 +908,83 @@ def test_live_server_outputs_are_minimal() -> None:
         assert r == {"ok": True, "started": True}
     finally:
         srv.rocq_close(session_id="minimal_outputs")
+
+
+@needs_rocq
+def test_live_cancel_looping_tactic_recovers_mcp_server() -> None:
+    """Cancellation must kill a looping backend and leave lifecycle tools usable."""
+    from coqtail_mcp import server as srv
+
+    source = "Ltac loop := loop.\nGoal True.\nProof.\n  loop.\n"
+
+    async def call(name: str, arguments: dict):
+        _content, structured = await srv.mcp.call_tool(name, arguments)
+        return structured["result"]
+
+    async def scenario() -> None:
+        started = await call(
+            "rocq_start",
+            {
+                "session_id": "cancel_loop_live",
+                "content": source,
+                "coq_path": COQ_PATH,
+                "coq_prog": COQ_PROG,
+            },
+        )
+        assert started["ok"], started
+        session = srv._registry.get("cancel_loop_live")
+        try:
+            prefix = await call(
+                "rocq_step_to",
+                {
+                    "session_id": "cancel_loop_live",
+                    "line": 3,
+                    "step_timeout": 5,
+                },
+            )
+            assert prefix["ok"] and prefix["success"], prefix
+
+            command_sent = threading.Event()
+            send_cmd = session._coqtop.send_cmd
+
+            def observe_send(cmd: bytes) -> None:
+                send_cmd(cmd)
+                command_sent.set()
+
+            session._coqtop.send_cmd = observe_send
+            busy = asyncio.create_task(
+                srv.mcp.call_tool(
+                    "rocq_step_to",
+                    {
+                        "session_id": "cancel_loop_live",
+                        "line": 4,
+                        # Keep the test bounded even if cancellation regresses.
+                        "step_timeout": 3,
+                    },
+                )
+            )
+            assert await asyncio.to_thread(command_sent.wait, 2)
+            assert not busy.done()
+            busy.cancel()
+            try:
+                await busy
+            except asyncio.CancelledError:
+                pass
+
+            listed = await asyncio.wait_for(call("rocq_list", {}), timeout=2)
+            assert "cancel_loop_live" not in listed["session_ids"]
+            for _ in range(30):
+                if not session._coqtop.running():
+                    break
+                await asyncio.sleep(0.1)
+            assert not session._coqtop.running()
+        finally:
+            if "cancel_loop_live" in srv._registry.list_ids():
+                srv.rocq_close(session_id="cancel_loop_live")
+            elif session._coqtop.running():
+                session.abort()
+
+    asyncio.run(scenario())
 
 
 @needs_rocq

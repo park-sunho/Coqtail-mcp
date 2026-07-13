@@ -16,12 +16,14 @@ start at 1, column numbers start at 1). ``rocq_step_to(line=-1)`` targets EOF.
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import json
 import os
 import signal
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -37,6 +39,45 @@ DEFAULT_STEP_TIMEOUT_SECONDS = 30
 STEP_TIMEOUT_ENV = "COQTAIL_MCP_STEP_TIMEOUT"
 DEFAULT_QUERY_TIMEOUT_SECONDS = 30
 QUERY_TIMEOUT_ENV = "COQTAIL_MCP_QUERY_TIMEOUT"
+
+
+def _abort_registered_session(session_id: Optional[str]) -> None:
+    """Drop and force-abort one session without waiting for its traffic lock."""
+    if session_id is None:
+        return
+    try:
+        session = _registry.drop(session_id)
+    except SessionError:
+        return
+    session.abort()
+
+
+def _threaded_mcp_tool(
+    *,
+    description: str,
+    abort_session_on_cancel: bool = False,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Register a blocking sync implementation as an async MCP tool.
+
+    FastMCP invokes synchronous tools on its event-loop thread. Rocq XML calls
+    are blocking, so expose an async wrapper while returning the original
+    function for direct unit tests and internal callers.
+    """
+
+    def register(fn: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(fn)
+        async def run_in_worker(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await asyncio.to_thread(fn, *args, **kwargs)
+            except asyncio.CancelledError:
+                if abort_session_on_cancel:
+                    _abort_registered_session(kwargs.get("session_id"))
+                raise
+
+        mcp.tool(description=description)(run_in_worker)
+        return fn
+
+    return register
 
 
 def _brief_error(exc: BaseException, *, limit: int = 300) -> str:
@@ -237,7 +278,7 @@ def rocq_start(
         return _err(exc)
 
 
-@mcp.tool(
+@_threaded_mcp_tool(
     description=(
         "Close a session. The underlying coqidetop subprocess is terminated\n"
         "and its state is dropped. Safe to call on an unknown id (returns\n"
@@ -253,7 +294,8 @@ def rocq_close(session_id: str) -> Dict[str, Any]:
         return _err(exc)
 
 
-@mcp.tool(
+@_threaded_mcp_tool(
+    abort_session_on_cancel=True,
     description=(
         "Advance or rewind the session so its state matches a position in\n"
         "the buffer. `line` is 1-indexed; pass `line=-1` to target EOF\n"
@@ -276,7 +318,8 @@ def rocq_close(session_id: str) -> Dict[str, Any]:
         "`COQTAIL_MCP_STEP_TIMEOUT`; pass 0 to disable. On timeout, the\n"
         "server interrupts Rocq, leaves the endpoint at the last successful\n"
         "sentence, and returns `timed_out: true` so callers can retry and\n"
-        "compare endpoint progress."
+        "compare endpoint progress. A backend that does not answer the\n"
+        "timeout interrupt is terminated."
     )
 )
 def rocq_step_to(
@@ -314,7 +357,8 @@ def rocq_step_to(
         return _err(exc)
 
 
-@mcp.tool(
+@_threaded_mcp_tool(
+    abort_session_on_cancel=True,
     description=(
         "Return the current proof goal and hypothesis context.\n\n"
         "`summary` gives a structured view: list of focused goals, each with\n"
@@ -366,7 +410,8 @@ def rocq_goals(
         return _err(exc)
 
 
-@mcp.tool(
+@_threaded_mcp_tool(
+    abort_session_on_cancel=True,
     description=(
         "Run a non-state-changing query (`Check`, `Print`, `Search`, `About`,\n"
         "`Locate`, `Compute`, …). The trailing `.` is optional — it's added\n"
@@ -444,7 +489,8 @@ def _install_signal_handlers() -> None:
     def _handler(signum: int, _frame: Any) -> None:  # pragma: no cover
         _registry.close_all()
         # Re-raise the default behaviour so the process actually exits.
-        os.kill(os.getpid(), signal.SIGKILL if signum == signal.SIGKILL else signum)
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
