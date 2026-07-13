@@ -65,6 +65,9 @@ else:
     VersionInfo = Mapping[str, Any]
 
 
+INTERRUPT_GRACE_SECONDS = 2
+
+
 def join_not_empty(msgs: Iterable[str], joiner: str = "\n\n") -> str:
     """Concatenate non-empty messages."""
     return joiner.join(msg for msg in msgs if msg != "")
@@ -374,6 +377,28 @@ class Coqtop:
             pass
         if self.log is not None and not self.log.closed:
             self.log.close()
+
+    def abort(self) -> None:
+        """Force backend termination without waiting for protocol locks.
+
+        This is deliberately smaller than :meth:`stop`: it is safe to call
+        from an MCP cancellation handler while another thread is blocked in
+        ``get_answer``.  The stdout EOF/death checks wake that thread, which
+        can then perform normal cleanup.
+        """
+        self.stopping = True
+        dune = self.dune
+        if dune is not None:
+            try:
+                dune.kill()
+            except (OSError, AttributeError):
+                pass
+        coqtop = self.coqtop
+        if coqtop is not None and coqtop.poll() is None:
+            try:
+                coqtop.kill()
+            except (OSError, AttributeError):
+                pass
 
     def advance(
         self,
@@ -821,15 +846,26 @@ class Coqtop:
             self.logger.debug(prettyxml(msg))
         self.send_cmd(msg)
 
-        with futures.ThreadPoolExecutor(1) as pool:
+        pool = futures.ThreadPoolExecutor(1)
+        answer = pool.submit(lambda: self.get_answer(stderr_is_warning))
+        try:
+            timeout = None if timeout == 0 else timeout
+            response, err = answer.result(timeout)
+        except futures.TimeoutError:
+            self.interrupt()
             try:
-                timeout = None if timeout == 0 else timeout
-                response, err = pool.submit(
-                    lambda: self.get_answer(stderr_is_warning)
-                ).result(timeout)
-            except futures.TimeoutError:
-                self.interrupt()
-                response, err = TIMEOUT_ERR, ""
+                # A normal Rocq interrupt produces a protocol response.  Give
+                # it a short grace period, then kill the unresponsive backend
+                # instead of blocking in ThreadPoolExecutor.__exit__ forever.
+                answer.result(timeout=INTERRUPT_GRACE_SECONDS)
+            except futures.TimeoutError as exc:
+                self.abort()
+                raise CoqtopError(
+                    "Rocq ignored the command timeout and was terminated."
+                ) from exc
+            response, err = TIMEOUT_ERR, ""
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
         return self.xml.standardize(cmd, response), err
 
@@ -855,9 +891,14 @@ class Coqtop:
                 return STDERR_ERR, err
 
             try:
-                data.append(self.out_q.get(timeout=poll_sec))
+                chunk = self.out_q.get(timeout=poll_sec)
             except Empty:
+                if not self.running():
+                    raise CoqtopError("Rocq exited before sending a response.")
                 continue
+            if chunk == b"":
+                raise CoqtopError("Rocq closed stdout before sending a response.")
+            data.append(chunk)
             xml = b"".join(data)
             if not self.xml.worth_parsing(xml):
                 continue
@@ -896,7 +937,13 @@ class Coqtop:
         """Continually read data from 'stream' into 'buffer'."""
         while not self.stopping:
             try:
-                buffer.put(stream.read(0x10000))
+                chunk = stream.read(0x10000)
+                if chunk == b"":
+                    # EOF is terminal.  Publish one sentinel so a dispatch
+                    # already blocked in get_answer() wakes immediately.
+                    buffer.put(chunk)
+                    return
+                buffer.put(chunk)
             except (AttributeError, OSError, ValueError):
                 # Rocq died
                 return
@@ -919,18 +966,21 @@ class Coqtop:
 
     def interrupt(self) -> None:
         """Send a SIGINT signal to Rocq or a SIGTERM signal to dune."""
-        if self.dune is not None:
+        dune = self.dune
+        coqtop = self.coqtop
+        if dune is not None:
             # if dune is running, stop it
-            self.dune.send_signal(signal.SIGTERM)
-            self.dune.wait()
+            dune.send_signal(signal.SIGTERM)
+            dune.wait()
             self.dune = None
-        elif self.coqtop is not None:
-            self.coqtop.send_signal(signal.SIGINT)
+        elif coqtop is not None:
+            coqtop.send_signal(signal.SIGINT)
 
     # Current State #
     def running(self) -> bool:
         """Check if Rocq has already been started."""
-        return self.coqtop is not None and self.coqtop.poll() is None
+        coqtop = self.coqtop
+        return coqtop is not None and coqtop.poll() is None
 
     # Debugging #
     def toggle_debug(self) -> Optional[str]:

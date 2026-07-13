@@ -171,11 +171,20 @@ class RocqSession:
             }
 
     def close(self) -> None:
+        # Do not wait for the traffic lock before stopping the process: that
+        # lock may be held by a tactic that will never return.  Closing the
+        # pipes wakes Coqtop.get_answer(), which then releases the lock.
+        self.abort()
         with self._lock:
             try:
                 self._coqtop.stop()
             finally:
                 self._started = False
+
+    def abort(self) -> None:
+        """Force the backend to stop without acquiring the traffic lock."""
+        self._started = False
+        self._coqtop.abort()
 
     # ------------------------------------------------------------------ buffer
     def set_buffer(self, content: str) -> None:
@@ -328,6 +337,7 @@ class RocqSession:
                     stderr_is_warning=self._stderr_is_warning,
                 )
             except CT.CoqtopError as e:
+                self._started = False
                 err_text = str(e)
                 break
 
@@ -384,9 +394,13 @@ class RocqSession:
         if steps == 0:
             return 0
 
-        ok, msg, extra_steps, stderr = self._coqtop.rewind(
-            steps, stderr_is_warning=self._stderr_is_warning
-        )
+        try:
+            ok, msg, extra_steps, stderr = self._coqtop.rewind(
+                steps, stderr_is_warning=self._stderr_is_warning
+            )
+        except CT.CoqtopError:
+            self._started = False
+            raise
         if not ok:
             raise SessionError(f"rewind failed: {msg}\n{stderr}".strip())
 
@@ -407,10 +421,14 @@ class RocqSession:
         if not self._started:
             raise SessionError("session not started")
         with self._lock:
-            ok, msg, goals, stderr = self._coqtop.goals(
-                timeout=None,
-                stderr_is_warning=self._stderr_is_warning,
-            )
+            try:
+                ok, msg, goals, stderr = self._coqtop.goals(
+                    timeout=None,
+                    stderr_is_warning=self._stderr_is_warning,
+                )
+            except CT.CoqtopError:
+                self._started = False
+                raise
             # ``ok`` only reflects whether Rocq accepted the Goal call —
             # a proof-less state returns ok=True with goals=None.
             if not ok:
@@ -439,6 +457,7 @@ class RocqSession:
                     stderr_is_warning=self._stderr_is_warning,
                 )
             except CT.CoqtopError as e:
+                self._started = False
                 return QueryResult(success=False, message=str(e), stderr="")
         if not ok and msg == TIMEOUT_ERR.msg:
             return QueryResult(
@@ -452,10 +471,13 @@ class RocqSession:
 
     # ------------------------------------------------------------------ status
     def status(self) -> Dict[str, Any]:
+        started = self._started and self._coqtop.running()
+        if not started:
+            self._started = False
         return {
             "session_id": self.session_id,
             "filename": self.filename,
-            "started": self._started,
+            "started": started,
             "version": self.version_info,
             "sentences_sent": len(self.endpoints),
             "endpoint": self._public_endpoint(),

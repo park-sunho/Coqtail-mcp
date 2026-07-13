@@ -7,9 +7,10 @@ one-off queries like `Check`, `Print`, or `Search`.
 
 Under the hood it talks to `coqidetop` / `coqtop` using the same XML protocol
 that the [Coqtail](https://github.com/whonore/Coqtail) vim plugin uses. The
-XML plumbing is not rewritten — three of Coqtail's Python modules
-(`xmlInterface.py`, `coqtop.py`, `coqtail.py`) are vendored verbatim under
-`src/coqtail_mcp/coqtail_lib/` and driven by a thin session layer.
+XML plumbing is not rewritten — three of Coqtail's Python modules are vendored
+under `src/coqtail_mcp/coqtail_lib/` and driven by a thin session layer.
+`xmlInterface.py` and `coqtail.py` remain verbatim; `coqtop.py` carries small
+backend-lifecycle changes for bounded timeout and cancellation recovery.
 
 ## Why reuse Coqtail?
 
@@ -234,6 +235,11 @@ For `rocq_query`, `query_timeout` caps one query. The default is 30 seconds,
 configurable globally with `COQTAIL_MCP_QUERY_TIMEOUT` or per call with
 `query_timeout`; pass `0` to disable it. A query timeout returns
 `timed_out: true` and does not advance the session state.
+After startup, operations that can wait on Rocq run off the MCP event loop, so
+lifecycle tools remain responsive while a tactic is running. Cancelling a
+step, goals, or query call removes the affected session and terminates its
+backend. If Rocq ignores a timeout interrupt, the backend is force-terminated
+and the session reports `started: false` instead of retaining its lock.
 For `rocq_goals` and `rocq_query`, `max_chars` is a positive integer that caps
 each emitted string value independently. Truncated strings end with `...`,
 with the suffix included inside the character limit.
@@ -261,7 +267,7 @@ Coqtail-mcp/
 │   ├── session.py           # RocqSession + SessionRegistry
 │   ├── project.py           # _CoqProject / Dune discovery
 │   ├── formatting.py        # Goals → plain text / structured summary
-│   └── coqtail_lib/         # vendored Coqtail modules (unmodified)
+│   └── coqtail_lib/         # vendored Coqtail protocol modules
 │       ├── xmlInterface.py
 │       ├── coqtop.py
 │       └── coqtail.py
